@@ -181,7 +181,7 @@ self.onmessage = async (e) => {
     const pos = new Float32Array((vp.length / np) * 3);
     for (let i = 0, j = 0; i < vp.length; i += np, j += 3) { pos[j] = vp[i]; pos[j + 1] = vp[i + 1]; pos[j + 2] = vp[i + 2]; }
     const idx = new Uint32Array(m.triVerts);
-    self.postMessage({ type: 'done', pos, idx, passport: r.passport, warn: r.warn, ms: performance.now() - t }, [pos.buffer, idx.buffer]);
+    self.postMessage({ type: 'done', pos, idx, passport: r.passport, warn: r.warn, lamp: r.L, armDeg: r.armDeg, ms: performance.now() - t }, [pos.buffer, idx.buffer]);
   } catch (err) {
     self.postMessage({ type: 'error', message: String((err && err.message) || err) });
   }
@@ -210,8 +210,8 @@ self.onmessage = async (e) => {
     return { P, tiers };
   }
 
-  function lampMeshes(P, tiers, armDeg) {
-    const g = new THREE.Group(), L = P.lamps;
+  function lampMeshes(L, tiers, armDeg) {
+    const g = new THREE.Group();
     const ring = new THREE.Mesh(new THREE.CylinderGeometry(L.ring_radius, L.ring_radius, L.ring_height, 32), brass);
     ring.rotation.x = Math.PI / 2; g.add(ring);
     tiers.forEach((t, ti) => {
@@ -228,7 +228,7 @@ self.onmessage = async (e) => {
         g.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3([p0, mid, p1]), 12, L.arm_tube_d / 2, 8), brass));
         const dir = new THREE.Vector3(Math.cos(th) * c, Math.cos(th) * s, Math.sin(th));
         const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), dir);
-        const sockGeo = new THREE.CylinderGeometry(20, 20, L.socket_length, 20); sockGeo.rotateX(Math.PI / 2);
+        const sr = (L.socket_d || 40) / 2, sockGeo = new THREE.CylinderGeometry(sr, sr, L.socket_length, 20); sockGeo.rotateX(Math.PI / 2);
         const sock = new THREE.Mesh(sockGeo, dark); sock.quaternion.copy(q); sock.position.copy(at(L.socket_length / 2)); g.add(sock);
         const bulb = new THREE.Mesh(new THREE.SphereGeometry(1, 20, 14), bulbMat);
         bulb.scale.set(L.bulb_d / 2, L.bulb_d / 2, L.bulb_length / 2); bulb.quaternion.copy(q);
@@ -248,8 +248,7 @@ self.onmessage = async (e) => {
     geo.computeBoundingBox();
     group.add(new THREE.Mesh(geo, brass));
     const top = geo.boundingBox.max.z;
-    const armDeg = +(/гиб рожков (\d+)/.exec(m.passport['лампы'] || '') || [0, 0])[1];
-    const lampsG = lampMeshes(P, tiers, armDeg); lampsG.visible = m.passport['зазор ламп до рёбер, мм'] >= 0; group.add(lampsG);
+    const lampsG = lampMeshes(m.lamp, tiers, m.armDeg); lampsG.visible = m.passport['зазор ламп до рёбер, мм'] >= 0; group.add(lampsG);
     // центральная труба: от кольца в центре до полюса (M10 или M12 — из паспорта)
     const tubeR = /M12/.test(m.passport['труба центрального узла'] || '') ? 6 : 5;
     const pipe = new THREE.Mesh(new THREE.CylinderGeometry(tubeR, tubeR, top, 16), brass);
@@ -310,8 +309,8 @@ self.onmessage = async (e) => {
         passportView(m.passport, m.ms);
         const gap = m.passport['зазор ламп до рёбер, мм'];
         const need = Math.ceil((state.diam + 2 * (40 - gap)) / 50) * 50;           // зазор растёт ~ на полширины
-        const stop = gap < 0 ? `<span class="chip stop">Так не делаем: лампы A60 выходят за решётку на ${-gap} мм. ` +
-          `Нужна ширина примерно от ${need} мм или лампы меньше.</span>` : '';
+        const stop = gap < 0 ? `<span class="chip stop">Так не делаем: лампы выходят за решётку на ${-gap} мм даже на E14 с коротким рожком. ` +
+          `Нужна ширина примерно от ${need} мм или меньше ламп.</span>` : '';
         $('warns').innerHTML = stop + (m.warn.length ? m.warn.map((x) => `<span class="chip">${x}</span>`).join('') : (stop ? '' : '<span class="chip ok">все проверки пройдены</span>'));
         $('stageSub').textContent = `${state.shape === 'oval' ? 'овал' : 'шар'} · ${state.pattern === 'drops' ? 'капли' : 'круглые ячейки'} · зерно ${state.seed}`;
       } else {

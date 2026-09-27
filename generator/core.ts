@@ -140,7 +140,10 @@ export function build(P: any, wasm: any) {
   // E27/A60 → E14/G45 → рожок короче — пока лампы с прямыми рожками не влезут с запасом lamp_min_gap
   const pickLampSpec = () => {
     const opts = [{}, ...(P.lamps.fallbacks ?? [])];
-    for (const o of opts) { Lp = { ...P.lamps, socket_name: P.lamps.socket_name ?? 'E27', bulb_name: P.lamps.bulb_name ?? 'A60', ...o }; if (lampGap(0) >= (P.lamp_min_gap ?? 40)) return; }
+    for (const o of opts) {
+      Lp = { ...P.lamps, socket_name: P.lamps.socket_name ?? 'E27', bulb_name: P.lamps.bulb_name ?? 'A60', ...o };
+      if (lampGap(pickAngle()) >= (P.lamp_min_gap ?? 40)) return;      // с лучшим допустимым углом гиба
+    }
   };
   const pickAngle = () => {
     for (let deg = Lp.arm_angle_deg; deg > 0; deg -= 5) if (lampGap(deg) >= (P.lamp_min_gap ?? 40)) return deg;
