@@ -1,0 +1,314 @@
+<title>CELL Генератор</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Tenor+Sans&display=swap">
+<style>
+:root {
+  --ground: #f1ede6; --panel: #fbf9f5; --line: #dcd3c3; --ink: #1f1b14; --muted: #6d6455;
+  --brass: #94702c; --brass-soft: #e9dcc2; --stage: #141210; --warn: #9a4a1c; --warn-bg: #f5e3d6;
+  --ui: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+  --display: "Tenor Sans", "IBM Plex Sans", Georgia, serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground: #12100d; --panel: #1b1814; --line: #332d24; --ink: #ece5d8; --muted: #a2988a;
+    --brass: #d1ad66; --brass-soft: #3a3020; --stage: #0c0b09; --warn: #f0a36e; --warn-bg: #3b2416; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --ground: #12100d; --panel: #1b1814; --line: #332d24; --ink: #ece5d8; --muted: #a2988a;
+  --brass: #d1ad66; --brass-soft: #3a3020; --stage: #0c0b09; --warn: #f0a36e; --warn-bg: #3b2416; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body { background: var(--ground); color: var(--ink); font-family: var(--ui); font-size: 14px; line-height: 1.45; padding-inline: 16px; padding-block: 16px; }
+.app { max-width: 1280px; margin: 0 auto; display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 16px; min-height: calc(100% - 0px); }
+.stage { position: relative; background: var(--stage); border-radius: 6px; min-height: 560px; overflow: hidden; }
+.stage canvas { display: block; width: 100%; height: 100%; }
+.stage .tag { position: absolute; left: 16px; top: 14px; color: #e8dcc2; font-family: var(--display); font-size: 22px; letter-spacing: .08em; pointer-events: none; }
+.stage .sub { position: absolute; left: 16px; top: 44px; color: #9c917d; font-size: 12px; letter-spacing: .06em; text-transform: uppercase; pointer-events: none; }
+.stage .hint { position: absolute; left: 16px; bottom: 12px; color: #8a806e; font-size: 12px; pointer-events: none; }
+.busy { position: absolute; inset: 0; display: grid; place-items: center; background: rgba(12, 11, 9, .55); color: #eadfc6; font-size: 15px; letter-spacing: .04em; }
+.busy span { padding: 10px 16px; border: 1px solid #5c4f38; border-radius: 4px; background: #16130f; }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 18px; display: flex; flex-direction: column; gap: 18px; }
+.panel h1 { font-family: var(--display); font-weight: 400; font-size: 26px; letter-spacing: .06em; margin: 0; text-wrap: balance; }
+.panel .lede { color: var(--muted); margin: 4px 0 0; }
+.group { display: flex; flex-direction: column; gap: 8px; }
+.group > label, .group > .lbl { font-size: 11px; letter-spacing: .09em; text-transform: uppercase; color: var(--muted); display: flex; justify-content: space-between; }
+.group > label output, .lbl output { font-family: var(--mono); color: var(--ink); letter-spacing: 0; text-transform: none; font-size: 13px; }
+.seg { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
+.seg button { font: inherit; background: transparent; color: var(--ink); border: 0; border-right: 1px solid var(--line); padding: 8px 6px; cursor: pointer; }
+.seg button:last-child { border-right: 0; }
+.seg button[aria-pressed="true"] { background: var(--brass-soft); color: var(--ink); font-weight: 600; }
+.seg button:focus-visible, .btn:focus-visible, input[type=range]:focus-visible { outline: 2px solid var(--brass); outline-offset: 2px; }
+input[type=range] { width: 100%; accent-color: var(--brass); }
+.row { display: flex; gap: 8px; align-items: center; }
+.btn { font: inherit; font-weight: 600; background: var(--brass); color: var(--panel); border: 0; border-radius: 4px; padding: 10px 14px; cursor: pointer; flex: 1; }
+.btn.ghost { background: transparent; color: var(--ink); border: 1px solid var(--line); font-weight: 500; flex: 0 0 auto; }
+.btn:disabled { opacity: .5; cursor: progress; }
+.seed { font-family: var(--mono); font-size: 13px; color: var(--muted); white-space: nowrap; }
+.passport { border-top: 1px solid var(--line); padding-top: 14px; display: grid; grid-template-columns: auto 1fr; column-gap: 12px; row-gap: 6px; margin: 0; }
+.passport dt { color: var(--muted); }
+.passport dd { margin: 0; text-align: right; font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 13px; }
+.passport dd.big { font-size: 18px; color: var(--brass); }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { font-size: 12px; padding: 3px 8px; border-radius: 3px; background: var(--warn-bg); color: var(--warn); }
+.chip.ok { background: var(--brass-soft); color: var(--ink); }
+.note { color: var(--muted); font-size: 12px; margin: 0; }
+@media (max-width: 860px) {
+  .app { grid-template-columns: 1fr; }
+  .stage { min-height: 420px; }
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+</style>
+
+<div class="app">
+  <section class="stage" id="stage" aria-label="3D-вид изделия">
+    <div class="tag">CELL</div>
+    <div class="sub" id="stageSub">генеративная люстра · латунь</div>
+    <div class="hint">крутить — мышью или пальцем, приблизить — колесом</div>
+    <div class="busy" id="busy"><span id="busyText">Запускаю генератор…</span></div>
+  </section>
+
+  <aside class="panel">
+    <div>
+      <h1>Семейство CELL</h1>
+      <p class="lede">Литая латунная решётка. Каждое зерно — свой экземпляр: узор, а у овала и форма, рождаются заново.</p>
+    </div>
+
+    <div class="group">
+      <span class="lbl">Форма</span>
+      <div class="seg" role="group" aria-label="Форма">
+        <button id="shape-sphere" type="button" aria-pressed="true">Шар</button>
+        <button id="shape-oval" type="button" aria-pressed="false">Овал</button>
+      </div>
+    </div>
+
+    <div class="group">
+      <span class="lbl">Узор</span>
+      <div class="seg" role="group" aria-label="Узор">
+        <button id="pat-round" type="button" aria-pressed="true">Круглые ячейки</button>
+        <button id="pat-drops" type="button" aria-pressed="false">Капли</button>
+      </div>
+    </div>
+
+    <div class="group">
+      <label for="diam">Ширина <output id="diamOut">600 мм</output></label>
+      <input id="diam" type="range" min="450" max="850" step="50" value="600">
+    </div>
+
+    <div class="group">
+      <label for="lamps">Лампы <output id="lampsOut">5</output></label>
+      <input id="lamps" type="range" min="1" max="15" step="1" value="5">
+      <div class="seg" role="group" aria-label="Куда светят лампы">
+        <button id="dir-down" type="button" aria-pressed="true">Вниз</button>
+        <button id="dir-straight" type="button" aria-pressed="false">Прямо</button>
+        <button id="dir-up" type="button" aria-pressed="false">Вверх</button>
+      </div>
+    </div>
+
+    <div class="row">
+      <button class="btn" id="again" type="button">Ещё вариант</button>
+      <span class="seed">зерно <span id="seed">1</span></span>
+    </div>
+
+    <dl class="passport" id="passport"></dl>
+    <div class="chips" id="warns"></div>
+    <p class="note">Превью в браузере — сетка 5 мм, масса ±5%. Точные файлы на печать, панели, номера и шаблон гиба рожка — в цеховом запуске того же генератора. Больше 5 ламп — ярусами, кольцо Ø160 (условно).</p>
+  </aside>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/environments/RoomEnvironment.js"></script>
+<script>
+/*__CELL_CORE__*/
+</script>
+<script>
+window.__MANIFOLD_WASM__ = "/*__MANIFOLD_WASM__*/";
+window.__PARAMS__ = /*__PARAMS__*/;
+</script>
+<script type="module">
+/*__MANIFOLD_JS__*/
+</script>
+<script type="module">
+(async () => {
+  const $ = (id) => document.getElementById(id);
+  const busy = $('busy'), busyText = $('busyText');
+  const state = { shape: 'sphere', pattern: 'round', diam: 600, lamps: 5, dir: 'down', seed: 1 };
+
+  // ── 3D ──
+  const stage = $('stage');
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+  renderer.outputEncoding = THREE.sRGBEncoding;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.05;
+  stage.prepend(renderer.domElement);
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x0c0b09);
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  scene.environment = pmrem.fromScene(new THREE.RoomEnvironment(), 0.04).texture;
+  const camera = new THREE.PerspectiveCamera(35, 1, 0.01, 50);
+  const controls = new THREE.OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  const key = new THREE.DirectionalLight(0xfff1dc, 1.6); key.position.set(1.5, 2, 1.8); scene.add(key);
+  const glow = new THREE.PointLight(0xffc27a, 1.4, 3); scene.add(glow);
+  const brass = new THREE.MeshStandardMaterial({ color: 0xc9a45c, metalness: 0.92, roughness: 0.32 });
+  const bulbMat = new THREE.MeshStandardMaterial({ color: 0xfff4e0, emissive: 0xffd9a0, emissiveIntensity: 1.2, roughness: 0.4 });
+  const dark = new THREE.MeshStandardMaterial({ color: 0x3b3326, metalness: 0.6, roughness: 0.5 });
+  let group = null;
+  const resize = () => {
+    const w = stage.clientWidth, h = stage.clientHeight;
+    renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix();
+  };
+  new ResizeObserver(resize).observe(stage); resize();
+  renderer.setAnimationLoop(() => { controls.update(); renderer.render(scene, camera); });
+
+  // ── движок ──
+  busyText.textContent = 'Запускаю генератор…';
+  const Module = window.ManifoldModule;
+  const bin = Uint8Array.from(atob(window.__MANIFOLD_WASM__), (c) => c.charCodeAt(0));
+  const wasm = await Module({ wasmBinary: bin });
+  wasm.setup();
+
+  const tiersFor = (n, dir) => {
+    if (n <= 5) return [{ direction: dir, count: n }];
+    const order = [dir, ...['down', 'straight', 'up'].filter((d) => d !== dir)];
+    const k = Math.ceil(n / 5), out = [];
+    for (let i = 0; i < k; i++) out.push({ direction: order[i], count: Math.floor(n / k) + (i < n % k ? 1 : 0) });
+    return out;
+  };
+
+  function paramsNow() {
+    const P = structuredClone(window.__PARAMS__);
+    P.shape = state.shape; P.pattern = state.pattern; P.diameter = state.diam; P.seed = state.seed;
+    P.mesh_step = 5; P.shape_samples = 8000; P.stretch_samples = 8000;
+    P.panels = { ...P.panels, enabled: false };
+    const tiers = tiersFor(state.lamps, state.dir);
+    P.lamps = { ...P.lamps, count: state.lamps, direction: state.dir, ring_radius: state.lamps > 5 ? 80 : 30 };
+    if (tiers.length > 1) P.lamps.tiers = tiers; else delete P.lamps.tiers;
+    return { P, tiers };
+  }
+
+  function lampMeshes(P, tiers, armDeg) {
+    const g = new THREE.Group(), L = P.lamps;
+    const ring = new THREE.Mesh(new THREE.CylinderGeometry(L.ring_radius, L.ring_radius, L.ring_height, 32), brass);
+    ring.rotation.x = Math.PI / 2; g.add(ring);
+    tiers.forEach((t, ti) => {
+      const sign = t.direction === 'up' ? 1 : t.direction === 'down' ? -1 : 0, th = sign * armDeg * Math.PI / 180;
+      const rb = L.arm_bend_radius, a = Math.max(0, (L.arm_length - rb * Math.abs(th)) / 2);
+      const endR = L.ring_radius + a + rb * Math.sin(Math.abs(th)) + a * Math.cos(th);
+      const endZ = Math.sign(th) * rb * (1 - Math.cos(th)) + a * Math.sin(th);
+      for (let i = 0; i < t.count; i++) {
+        const ph = 2 * Math.PI * (i + 0.5 * ti) / t.count, c = Math.cos(ph), s = Math.sin(ph);
+        const at = (s0) => new THREE.Vector3((endR + s0 * Math.cos(th)) * c, (endR + s0 * Math.cos(th)) * s, endZ + s0 * Math.sin(th));
+        const pts = [new THREE.Vector3(L.ring_radius * c, L.ring_radius * s, 0), at(0)];
+        const arm = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3([pts[0], pts[0].clone().lerp(pts[1], 0.5), pts[1]]), 8, L.arm_tube_d / 2, 8), brass);
+        g.add(arm);
+        const dir = new THREE.Vector3(Math.cos(th) * c, Math.cos(th) * s, Math.sin(th));
+        const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), dir);
+        const sock = new THREE.Mesh(new THREE.CylinderGeometry(20, 20, L.socket_length, 20), dark);
+        sock.geometry.rotateX(Math.PI / 2); sock.quaternion.copy(q); sock.position.copy(at(L.socket_length / 2)); g.add(sock);
+        const bulb = new THREE.Mesh(new THREE.SphereGeometry(1, 20, 14), bulbMat);
+        bulb.scale.set(L.bulb_d / 2, L.bulb_d / 2, L.bulb_length / 2); bulb.quaternion.copy(q);
+        bulb.position.copy(at(L.socket_length + L.bulb_length / 2)); g.add(bulb);
+      }
+    });
+    return g;
+  }
+
+  function show(res, P, tiers) {
+    if (group) { scene.remove(group); group.traverse((o) => o.geometry && o.geometry.dispose()); }
+    group = new THREE.Group();
+    const m = res.body.getMesh(), np = m.numProp, vp = m.vertProperties;
+    const pos = new Float32Array((vp.length / np) * 3);
+    for (let i = 0, j = 0; i < vp.length; i += np, j += 3) { pos[j] = vp[i]; pos[j + 1] = vp[i + 1]; pos[j + 2] = vp[i + 2]; }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    geo.setIndex(new THREE.BufferAttribute(new Uint32Array(m.triVerts), 1));
+    geo.computeVertexNormals();
+    group.add(new THREE.Mesh(geo, brass));
+    geo.computeBoundingBox();
+    const top = geo.boundingBox.max.z;
+    const armDeg = +(/гиб рожков (\d+)/.exec(res.passport['лампы'] || '') || [0, 0])[1];
+    group.add(lampMeshes(P, tiers, armDeg));
+    const rodLen = 520;
+    const rod = new THREE.Mesh(new THREE.CylinderGeometry(6, 6, rodLen, 16), brass);
+    rod.rotation.x = Math.PI / 2; rod.position.z = top + rodLen / 2; group.add(rod);
+    const cup = new THREE.Mesh(new THREE.CylinderGeometry(55, 38, 30, 40), brass);
+    cup.rotation.x = Math.PI / 2; cup.position.z = top + rodLen + 15; group.add(cup);
+    group.scale.setScalar(0.001);
+    group.rotation.x = -Math.PI / 2;                          // Z генератора — вверх
+    scene.add(group);
+    const R = Math.max(geo.boundingBox.max.x, geo.boundingBox.max.y) / 1000, H = (geo.boundingBox.max.z - geo.boundingBox.min.z) / 1000;
+    controls.target.set(0, 0.05, 0);
+    camera.position.set(R * 2.4, R * 0.9 + H * 0.3, R * 2.6);
+    glow.position.set(0, 0, 0);
+  }
+
+  function passportView(p, ms) {
+    const rows = [
+      ['Каркас, латунь', `${p['масса каркаса, кг'].toFixed(1)} кг`, true],
+      ['В сборе (оснащение условно)', `${p['масса в сборе, кг (оснащение условно)'].toFixed(1)} кг`],
+      ['Габарит', typeof p['габарит по факту, мм'] === 'number' ? `Ø${p['габарит по факту, мм']} мм` : p['габарит по факту, мм'] + ' мм'],
+      ['Ячеек', p['ячеек']],
+      ['Труба узла', p['труба центрального узла']],
+      ['Крепление', p['крепление']],
+      ['Лампы', p['лампы'].replace(/^\d+ шт\.: /, '')],
+      ['До ламп от решётки', `${p['зазор ламп до рёбер, мм']} мм`],
+      ['Центр тяжести от оси', `${p['центр тяжести от оси, мм']} мм`],
+      ['Собрано за', `${(ms / 1000).toFixed(1)} с`],
+    ];
+    $('passport').innerHTML = rows.map(([k, v, big]) => `<dt>${k}</dt><dd${big ? ' class="big"' : ''}>${v}</dd>`).join('');
+  }
+
+  let running = false, queued = false;
+  async function run() {
+    if (running) { queued = true; return; }
+    running = true; queued = false;
+    $('again').disabled = true;
+    busy.hidden = false; busyText.textContent = `Генерирую · ${state.shape === 'oval' ? 'овал' : 'шар'} Ø${state.diam}, зерно ${state.seed}…`;
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    const { P, tiers } = paramsNow();
+    const t = performance.now();
+    try {
+      const res = globalThis.CELL.build(P, wasm);
+      show(res, P, tiers);
+      passportView(res.passport, performance.now() - t);
+      const w = res.warn.filter((x) => !/центр тяжести/.test(x) || true);
+      $('warns').innerHTML = w.length ? w.map((x) => `<span class="chip">${x}</span>`).join('') : '<span class="chip ok">все проверки пройдены</span>';
+      $('stageSub').textContent = `${state.shape === 'oval' ? 'овал' : 'шар'} · ${state.pattern === 'drops' ? 'капли' : 'круглые ячейки'} · зерно ${state.seed}`;
+    } catch (e) {
+      $('warns').innerHTML = `<span class="chip">Не собралось: ${String(e && e.message || e)}. Поменяйте ширину или число ламп.</span>`;
+    }
+    busy.hidden = true; $('again').disabled = false; running = false;
+    if (queued) run();
+  }
+
+  const pressed = (ids, on) => ids.forEach((id) => $(id).setAttribute('aria-pressed', String(id === on)));
+  let timer = 0;
+  const later = () => { clearTimeout(timer); timer = setTimeout(run, 350); };
+  const setShape = (s) => {
+    state.shape = s; pressed(['shape-sphere', 'shape-oval'], 'shape-' + s);
+    const d = $('diam');
+    if (s === 'oval') { d.min = 700; d.max = 1000; if (state.diam < 700) state.diam = 850; }
+    else { d.min = 450; d.max = 850; if (state.diam > 850) state.diam = 600; }
+    d.value = state.diam; $('diamOut').textContent = state.diam + ' мм'; later();
+  };
+  $('shape-sphere').onclick = () => setShape('sphere');
+  $('shape-oval').onclick = () => setShape('oval');
+  $('pat-round').onclick = () => { state.pattern = 'round'; pressed(['pat-round', 'pat-drops'], 'pat-round'); later(); };
+  $('pat-drops').onclick = () => { state.pattern = 'drops'; pressed(['pat-round', 'pat-drops'], 'pat-drops'); later(); };
+  $('diam').oninput = (e) => { state.diam = +e.target.value; $('diamOut').textContent = state.diam + ' мм'; };
+  $('diam').onchange = later;
+  $('lamps').oninput = (e) => { state.lamps = +e.target.value; $('lampsOut').textContent = state.lamps; };
+  $('lamps').onchange = later;
+  for (const d of ['down', 'straight', 'up']) $('dir-' + d).onclick = () => { state.dir = d; pressed(['dir-down', 'dir-straight', 'dir-up'], 'dir-' + d); later(); };
+  $('again').onclick = () => { state.seed += 1; $('seed').textContent = state.seed; run(); };
+  run();
+})().catch((e) => {
+  document.getElementById('busyText').textContent = 'Генератор не запустился: ' + (e && e.message || e);
+});
+</script>

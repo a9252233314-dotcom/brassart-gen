@@ -1,0 +1,12 @@
+{
+  "name": "brassart-cell-generator",
+  "private": true,
+  "type": "module",
+  "description": "Brass Art — генератор семейства CELL (шар-решётка). v0.",
+  "scripts": {
+    "build": "node generate.ts"
+  },
+  "dependencies": {
+    "manifold-3d": "^3.5.4"
+  }
+}
