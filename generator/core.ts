@@ -113,7 +113,14 @@ export function build(P: any, wasm: any) {
   // лампы: точки по оси патрона и колбы с радиусом (капсула) — для выбора формы и проверки зазора
   let Lp: any = { ...P.lamps, socket_name: P.lamps.socket_name ?? 'E27', bulb_name: P.lamps.bulb_name ?? 'A60' };
   const lampTiers: { direction: string; count: number }[] = Lp.tiers ?? [{ direction: Lp.direction, count: Lp.count }];
+  const single = (lampTiers.reduce((s0, t) => s0 + t.count, 0) === 1) && P.lamps.single_center !== false;
   const capsFor = (deg: number) => {
+  if (single) {                                               // колба по центру, патрон над ней, всё на оси
+    const out: { q: V3; r: number }[] = [];
+    for (let k = 0; k <= 4; k++) out.push({ q: [0, 0, Lp.bulb_length / 2 - Lp.bulb_d / 2 - ((Lp.bulb_length - Lp.bulb_d) * k) / 4], r: Lp.bulb_d / 2 });
+    out.push({ q: [0, 0, Lp.bulb_length / 2 + Lp.socket_length / 2], r: (Lp.socket_d ?? 40) / 2 });
+    return out;
+  }
   const lampCaps: { q: V3; r: number }[] = [];
   // все рожки — по кольцу через равные углы, ярусы чередуются (lamp k → ярус k % число ярусов)
   const nAll = lampTiers.reduce((s0, t) => s0 + t.count, 0);
@@ -132,20 +139,25 @@ export function build(P: any, wasm: any) {
   });
   return lampCaps;
   };
-  const innerGap = (q: V3) => { const r = len(q), w = mul(q, 1 / r); return (rho(w) - r) * dot(normalAt(w), w) - T / 2; };
+  const innerGap = (q: V3) => {
+    const r = len(q);
+    if (r < 1) { const h: V3 = [1, 0, 0]; return rho(h) * dot(normalAt(h), h) - T / 2; }   // точка в самом центре — до стенки вбок
+    const w = mul(q, 1 / r); return (rho(w) - r) * dot(normalAt(w), w) - T / 2;
+  };
   const lampGap = (deg: number) => Math.min(...capsFor(deg).map((c) => innerGap(c.q) - c.r));
   // угол гиба рожка: самый большой до arm_angle_deg, при котором лампы не ближе lamp_min_gap к рёбрам
   // (мастер 2026-09-27: «на овале угол трубы поменьше, чтобы не задело»)
   // патрон и рожок под размер (мастер 2026-09-27: «в маленьком — E14», «трубы чуть укоротить»):
   // E27/A60 → E14/G45 → рожок короче — пока лампы с прямыми рожками не влезут с запасом lamp_min_gap
   const pickLampSpec = () => {
-    const opts = [{}, ...(P.lamps.fallbacks ?? [])];
+    const opts = single ? [{}] : [{}, ...(P.lamps.fallbacks ?? [])];   // одна лампа — всегда E27
     for (const o of opts) {
       Lp = { ...P.lamps, socket_name: P.lamps.socket_name ?? 'E27', bulb_name: P.lamps.bulb_name ?? 'A60', ...o };
       if (lampGap(pickAngle()) >= (P.lamp_min_gap ?? 40)) return;      // с лучшим допустимым углом гиба
     }
   };
   const pickAngle = () => {
+    if (single) return 0;
     for (let deg = Lp.arm_angle_deg; deg > 0; deg -= 5) if (lampGap(deg) >= (P.lamp_min_gap ?? 40)) return deg;
     return 0;
   };
@@ -577,8 +589,8 @@ export function build(P: any, wasm: any) {
   pickLampSpec();
   const L = Lp;
   const tiers: { direction: string; count: number }[] = L.tiers ?? [{ direction: L.direction, count: L.count }];
-  const armDeg = tiers.some((t) => t.direction !== 'straight') ? pickAngle() : 0;
-  if (armDeg < L.arm_angle_deg && tiers.some((t) => t.direction !== 'straight'))
+  const armDeg = !single && tiers.some((t) => t.direction !== 'straight') ? pickAngle() : 0;
+  if (!single && armDeg < L.arm_angle_deg && tiers.some((t) => t.direction !== 'straight'))
     warn.push(`угол гиба рожков уменьшен до ${armDeg}° (при ${L.arm_angle_deg}° лампы ближе ${P.lamp_min_gap ?? 40} мм к рёбрам)`);
   const lampCount = tiers.reduce((sN, t) => sN + t.count, 0);
   if (lampCount > L.max_count) warn.push(`ламп ${lampCount} — больше ${L.max_count} не ставим (мастер)`);
@@ -600,7 +612,9 @@ export function build(P: any, wasm: any) {
   if (gap < (P.lamp_min_gap ?? 40)) warn.push(`лампы близко к рёбрам: зазор ${gap.toFixed(0)} мм`);
   for (const t of tierInfo) if (t.between < 10) warn.push(`ярус «${t.direction}»: ${t.count} ламп не расходятся по кругу — между колбами ${t.between.toFixed(0)} мм`);
   const dirRu: Record<string, string> = { down: 'вниз', straight: 'прямо', up: 'вверх' };
-  const lampsText = `${lampCount} шт.: ` + tierInfo.map((t) => `${t.count} ${dirRu[t.direction] ?? t.direction}`).join(', ') + `, ${L.socket_name}/${L.bulb_name}, рожок ${L.arm_length} мм, кольцо Ø${2 * L.ring_radius}, гиб рожков ${armDeg}°`;
+  const lampsText = single
+    ? `1 шт.: по центру на оси, без кольца, патрон на трубе через переходник, ${L.socket_name}/${L.bulb_name}`
+    : `${lampCount} шт.: ` + tierInfo.map((t) => `${t.count} ${dirRu[t.direction] ?? t.direction}`).join(', ') + `, ${L.socket_name}/${L.bulb_name}, рожок ${L.arm_length} мм, кольцо Ø${2 * L.ring_radius}, гиб рожков ${armDeg}°`;
 
   const tag = `cell-${style}-${P.shape}${drops ? '-drops' : ''}-${P.diameter}-seed${P.seed}`;
   // для нарезки на панели (цех): узлы и рёбра решётки + функции формы
@@ -641,5 +655,5 @@ export function build(P: any, wasm: any) {
     'труба центрального узла': tube.name, крепление: mount,
     лампы: lampsText, 'зазор ламп до рёбер, мм': Math.round(gap), 'площадка на полюсе, мм': `Ø${P.pole_seat_d} под шайбу Ø${P.washer_d}, высота ${Math.round(seatTop - seatBottom)}`,
   };
-  return { body, passport, tag, warn, massOf, panelCtx, L, armDeg, t0 };
+  return { body, passport, tag, warn, massOf, panelCtx, L: { ...L, single }, armDeg, t0 };
 }

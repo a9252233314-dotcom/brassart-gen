@@ -212,6 +212,15 @@ self.onmessage = async (e) => {
 
   function lampMeshes(L, tiers, armDeg) {
     const g = new THREE.Group();
+    if (L.single) {                                           // одна лампа: по центру, патрон на трубе через переходник
+      const bulb = new THREE.Mesh(new THREE.SphereGeometry(1, 24, 16), bulbMat);
+      bulb.scale.set(L.bulb_d / 2, L.bulb_d / 2, L.bulb_length / 2); g.add(bulb);
+      const sr = (L.socket_d || 40) / 2, sock = new THREE.Mesh(new THREE.CylinderGeometry(sr, sr, L.socket_length, 24), dark);
+      sock.rotation.x = Math.PI / 2; sock.position.z = L.bulb_length / 2 + L.socket_length / 2; g.add(sock);
+      const ad = new THREE.Mesh(new THREE.CylinderGeometry((L.adapter_d || 20) / 2, (L.adapter_d || 20) / 2, L.adapter_length || 30, 20), brass);
+      ad.rotation.x = Math.PI / 2; ad.position.z = L.bulb_length / 2 + L.socket_length + (L.adapter_length || 30) / 2; g.add(ad);
+      return g;
+    }
     const ring = new THREE.Mesh(new THREE.CylinderGeometry(L.ring_radius, L.ring_radius, L.ring_height, 32), brass);
     ring.rotation.x = Math.PI / 2; g.add(ring);
     tiers.forEach((t, ti) => {
@@ -251,8 +260,9 @@ self.onmessage = async (e) => {
     const lampsG = lampMeshes(m.lamp, tiers, m.armDeg); lampsG.visible = m.passport['зазор ламп до рёбер, мм'] >= 0; group.add(lampsG);
     // центральная труба: от кольца в центре до полюса (M10 или M12 — из паспорта)
     const tubeR = /M12/.test(m.passport['труба центрального узла'] || '') ? 6 : 5;
-    const pipe = new THREE.Mesh(new THREE.CylinderGeometry(tubeR, tubeR, top, 16), brass);
-    pipe.rotation.x = Math.PI / 2; pipe.position.z = top / 2; group.add(pipe);
+    const L0 = m.lamp, z0 = L0.single ? L0.bulb_length / 2 + L0.socket_length + (L0.adapter_length || 30) : 0;   // низ трубы
+    const pipe = new THREE.Mesh(new THREE.CylinderGeometry(tubeR, tubeR, top - z0, 16), brass);
+    pipe.rotation.x = Math.PI / 2; pipe.position.z = (top + z0) / 2; group.add(pipe);
     const rodLen = 520;
     const rod = new THREE.Mesh(new THREE.CylinderGeometry(6, 6, rodLen, 16), brass);
     rod.rotation.x = Math.PI / 2; rod.position.z = top + rodLen / 2; group.add(rod);
