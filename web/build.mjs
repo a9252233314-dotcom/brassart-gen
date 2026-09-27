@@ -1,12 +1,14 @@
-// Сборка живой демо-страницы: шаблон + three.js + ядро генератора + manifold (wasm вшит) + params.json.
-// Всё в одном файле — со сторонних серверов ничего не грузится, кроме шрифтов (они не задерживают страницу).
-// Запуск из папки, где лежат generator/, web/, params.json:  node web/build.mjs
-//   → index.html          (целая страница — для GitHub Pages)
-//   → web/cell-demo.html  (без <head>/<body> — для закрытой страницы claude.ai)
+// Сборка сайта brassart-gen: каждое семейство — своя страница с живым генератором, сверху общее меню семейств.
+// Всё в одном файле на страницу — со сторонних серверов ничего не грузится, кроме шрифтов.
+// Запуск из корня репозитория:  node web/build.mjs
+//   → index.html     — CELL (шар-решётка)
+//   → lepestok.html  — ЛЕПЕСТОК (лепестки вокруг вазы)
 import { readFileSync, writeFileSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 
-execSync('npx --yes esbuild web.ts --bundle --format=iife --target=es2020 --outfile=../web/cell-core.js --log-level=warning', { cwd: 'generator', stdio: 'inherit' });
+const esb = (cwd, out) => execSync(`npx --yes esbuild web.ts --bundle --format=iife --target=es2020 --outfile=${out} --log-level=warning`, { cwd, stdio: 'inherit' });
+esb('generator', '../web/cell-core.js');
+esb('lepestok/generator', '../web/lepestok-core.js');
 
 const nm = 'generator/node_modules/';
 const safe = (s) => s.replaceAll('</script', '<\\/script');
@@ -16,25 +18,33 @@ let mj = readFileSync(nm + 'manifold-3d/manifold.js', 'utf8');
 if (!mj.includes('export default Module;')) throw new Error('manifold.js: не найден export default Module');
 mj = mj.replace('export default Module;', 'self.ManifoldModule = Module;');
 const wasm = readFileSync(nm + 'manifold-3d/manifold.wasm').toString('base64');
-const core = readFileSync('web/cell-core.js', 'utf8');
-const params = JSON.stringify(JSON.parse(readFileSync('params.json', 'utf8')));
+const nav = readFileSync('web/nav.html', 'utf8');
 
-const page = readFileSync('web/page_template.html', 'utf8')
-  .replace('/*__THREE__*/', () => safe(three))
-  .replace('/*__MANIFOLD_JS__*/', () => safe(mj))
-  .replace('/*__CELL_CORE__*/', () => safe(core))
-  .replace('/*__MANIFOLD_WASM__*/', () => wasm)
-  .replace('/*__PARAMS__*/', () => params);
-writeFileSync('web/cell-demo.html', page);
+const families = [
+  { fam: 'cell', out: 'index.html', tpl: ['web/page_template.html'], core: 'web/cell-core.js', marker: '/*__CELL_CORE__*/', params: 'params.json',
+    desc: 'Brass Art · CELL — генеративная латунная люстра: форма, узор, ширина и лампы собираются прямо в браузере.' },
+  { fam: 'lepestok', out: 'lepestok.html', tpl: ['lepestok/web/page_template.html', 'lepestok/web/page_body.html'], core: 'lepestok/web/lepestok-core.js',
+    marker: '/*__LEP_CORE__*/', params: 'lepestok/params.json',
+    desc: 'Brass Art · ЛЕПЕСТОК — генеративная латунная люстра: лепестки в два яруса вокруг гранёной вазы собираются прямо в браузере.' },
+];
 
-// целая страница: всё до конца <style> — в head
-const cut = page.indexOf('</style>') + '</style>'.length;
-const html = `<!doctype html>
+for (const f of families) {
+  const menu = nav.replace(`data-fam="${f.fam}"`, `data-fam="${f.fam}" aria-current="page"`);
+  const page = f.tpl.map((p) => readFileSync(p, 'utf8')).join('')
+    .replace('<!--__FAMILY_NAV__-->', () => menu)
+    .replace('/*__THREE__*/', () => safe(three))
+    .replace('/*__MANIFOLD_JS__*/', () => safe(mj))
+    .replace(f.marker, () => safe(readFileSync(f.core, 'utf8')))
+    .replace('/*__MANIFOLD_WASM__*/', () => wasm)
+    .replace('/*__PARAMS__*/', () => JSON.stringify(JSON.parse(readFileSync(f.params, 'utf8'))));
+  if (page.includes('__FAMILY_NAV__')) throw new Error(`${f.fam}: в шаблоне нет места под меню`);
+  const cut = page.indexOf('</style>') + '</style>'.length;       // всё до конца первого <style> — в head
+  const html = `<!doctype html>
 <html lang="ru">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="description" content="Brass Art · CELL — генеративная латунная люстра: форма, узор, ширина и лампы собираются прямо в браузере.">
+<meta name="description" content="${f.desc}">
 ${page.slice(0, cut)}
 </head>
 <body>
@@ -42,5 +52,6 @@ ${page.slice(cut)}
 </body>
 </html>
 `;
-writeFileSync('index.html', html);
-console.log('index.html:', Math.round(html.length / 1024), 'КБ · web/cell-demo.html:', Math.round(page.length / 1024), 'КБ');
+  writeFileSync(f.out, html);
+  console.log(f.out + ':', Math.round(html.length / 1024), 'КБ');
+}

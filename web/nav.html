@@ -1,0 +1,46 @@
+<style>
+.fam-nav { max-width: 1280px; margin: 0 auto 16px; display: flex; align-items: center; gap: 12px 20px; flex-wrap: wrap; }
+.fam-nav .brand { margin-right: auto; color: var(--ink); text-decoration: none; font-family: var(--display); font-size: 19px; letter-spacing: .16em; line-height: 1.1; }
+.fam-nav .brand small { display: block; margin-top: 3px; font-family: var(--ui); font-size: 11px; letter-spacing: .09em; text-transform: uppercase; color: var(--muted); }
+.fam-tabs { display: flex; gap: 8px; flex-wrap: wrap; }
+.fam-tab { display: flex; align-items: center; gap: 10px; padding: 7px 16px 7px 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--ink); text-decoration: none; transition: border-color .15s, background .15s; }
+.fam-tab svg { width: 36px; height: 36px; flex: none; color: var(--brass); }
+.fam-tab b { display: block; font-family: var(--display); font-weight: 400; font-size: 16px; letter-spacing: .08em; }
+.fam-tab span { display: block; font-size: 12px; color: var(--muted); }
+.fam-tab:hover { border-color: var(--brass); }
+.fam-tab[aria-current="page"] { background: var(--brass-soft); border-color: var(--brass); }
+.fam-tab:focus-visible, .fam-nav .brand:focus-visible { outline: 2px solid var(--brass); outline-offset: 2px; }
+.fam-nav + .app .stage { top: 16px; height: calc(100vh - 32px - 70px); }
+@media (max-width: 860px) {
+  .fam-nav .brand { flex: 1 0 100%; }
+  .fam-tabs { flex: 1 0 100%; }
+  .fam-tab { flex: 1 1 0; }
+  .fam-nav + .app .stage { height: 60vh; }
+}
+</style>
+<nav class="fam-nav" aria-label="Семейства люстр">
+  <a class="brand" href="index.html">BRASS ART<small>генеративные люстры · литая латунь</small></a>
+  <div class="fam-tabs">
+    <a class="fam-tab" href="index.html" data-fam="cell">
+      <svg viewBox="0 0 40 40" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round">
+        <circle cx="20" cy="21" r="16"/>
+        <path d="M20 13l6 4-1 7-5 3-5-3-1-7z"/>
+        <path d="M20 13V5M26 17l8-4M25 24l8 4M20 27v10M15 24l-8 4M14 17l-8-4"/>
+        <path d="M20 1v4"/>
+      </svg>
+      <div><b>CELL</b><span>шар-решётка</span></div>
+    </a>
+    <a class="fam-tab" href="lepestok.html" data-fam="lepestok">
+      <svg viewBox="0 0 40 40" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round">
+        <path d="M20 1v6"/>
+        <path d="M15.5 7h9l-2.5 13h-4z"/>
+        <path d="M18.5 19c-5 0-10 2-13 7 4.5 1 9-1 12-4.5"/>
+        <path d="M21.5 19c5 0 10 2 13 7-4.5 1-9-1-12-4.5"/>
+        <path d="M19 21c-2 5-6 10-12 12 1.5-5 6-9 11-10"/>
+        <path d="M21 21c2 5 6 10 12 12-1.5-5-6-9-11-10"/>
+        <path d="M5.5 26v-4M34.5 26v-4M7 33v-4M33 33v-4"/>
+      </svg>
+      <div><b>ЛЕПЕСТОК</b><span>лепестки вокруг вазы</span></div>
+    </a>
+  </div>
+</nav>

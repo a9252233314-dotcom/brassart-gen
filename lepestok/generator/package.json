@@ -1,0 +1,9 @@
+{
+  "name": "brassart-lepestok-generator",
+  "private": true,
+  "type": "module",
+  "description": "Brass Art — генератор семейства ЛЕПЕСТОК (лепестки вокруг вазы). v0.3.",
+  "dependencies": {
+    "manifold-3d": "^3.5.4"
+  }
+}

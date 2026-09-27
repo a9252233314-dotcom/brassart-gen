@@ -1,0 +1,232 @@
+
+<!--__FAMILY_NAV__-->
+<div class="app">
+  <section class="stage" id="stage" aria-label="3D-вид изделия">
+    <div class="tag">ЛЕПЕСТОК</div>
+    <div class="sub" id="stageSub">генеративная люстра · литая латунь</div>
+    <div class="hint">крутить — мышью или пальцем, приблизить — колесом</div>
+    <div class="busy" id="busy"><span id="busyText">Запускаю генератор…</span></div>
+  </section>
+
+  <aside class="panel">
+    <div>
+      <h1>Семейство ЛЕПЕСТОК</h1>
+      <p class="lede">Литые латунные лепестки в два яруса вокруг гранёной вазы. У каждого зерна лепестки свои: вылет, высота, ширина, изгиб. Каждый рожок — две отливки: ножка и лист.</p>
+    </div>
+
+    <div class="group">
+      <label for="diam">Ширина <output id="diamOut">650 мм</output></label>
+      <input id="diam" type="range" min="600" max="850" step="50" value="650">
+    </div>
+
+    <div class="group">
+      <label for="rod">Подвес <output id="rodOut">0.4 м</output></label>
+      <input id="rod" type="range" min="300" max="3000" step="100" value="400">
+    </div>
+
+    <div class="group">
+      <span class="lbl">Швы ножка / лист</span>
+      <div class="seg" role="group" aria-label="Показывать швы">
+        <button id="seam-off" type="button" aria-pressed="true">Скрыть</button>
+        <button id="seam-on" type="button" aria-pressed="false">Показать</button>
+      </div>
+    </div>
+
+    <div class="row">
+      <button class="btn" id="again" type="button">Ещё вариант</button>
+      <span class="seed">зерно <span id="seed">1</span></span>
+    </div>
+
+    <dl class="passport" id="passport"></dl>
+    <div class="chips" id="warns"></div>
+    <p class="note">Превью в браузере — сетка грубее, масса ±5%. Файлы на печать (24 куска и узел) — в цеховом запуске того же генератора. 12 ламп — два яруса по 6 граней узла; узел и число рожков доработаем позже. Лампы E14 — условно.</p>
+  </aside>
+</div>
+
+<script>/*__THREE__*/</script>
+<script type="text/plain" id="src-manifold">/*__MANIFOLD_JS__*/</script>
+<script type="text/plain" id="src-core">/*__LEP_CORE__*/</script>
+<script>
+window.__MANIFOLD_WASM__ = "/*__MANIFOLD_WASM__*/";
+window.__PARAMS__ = /*__PARAMS__*/;
+</script>
+<script>
+(() => {
+  const fl = document.createElement('link');
+  fl.rel = 'stylesheet';
+  fl.href = 'https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Tenor+Sans&display=swap';
+  document.head.appendChild(fl);
+
+  const $ = (id) => document.getElementById(id);
+  const busy = $('busy'), busyText = $('busyText');
+  if (!window.THREE || !THREE.OrbitControls) { busyText.textContent = '3D не запустилось в этом браузере — обновите браузер.'; return; }
+  const state = { diam: 650, rod: 400, seams: false, seed: 1 };
+
+  // ── 3D ──
+  const stage = $('stage');
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+  renderer.outputEncoding = THREE.sRGBEncoding;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.0;
+  stage.prepend(renderer.domElement);
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x0c0b09);
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  scene.environment = pmrem.fromScene(new THREE.RoomEnvironment(), 0.04).texture;
+  const camera = new THREE.PerspectiveCamera(35, 1, 0.01, 50);
+  const controls = new THREE.OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  const key = new THREE.DirectionalLight(0xfff1dc, 1.5); key.position.set(1.5, 2, 1.8); scene.add(key);
+  const under = new THREE.DirectionalLight(0xffe2b8, 0.5); under.position.set(-0.8, -2, 0.6); scene.add(under);
+  const glow = new THREE.PointLight(0xffc27a, 1.2, 3); scene.add(glow);
+  const brass = new THREE.MeshStandardMaterial({ color: 0xc8963e, metalness: 0.86, roughness: 0.3, side: THREE.DoubleSide });
+  const bulbMat = new THREE.MeshStandardMaterial({ color: 0xfff4e0, emissive: 0xffd9a0, emissiveIntensity: 1.2, roughness: 0.4 });
+  const seamMat = new THREE.MeshStandardMaterial({ color: 0xd8321e, emissive: 0x9a1c0c, emissiveIntensity: 0.8, roughness: 0.5 });
+  let group = null, seamMesh = null, last = null;
+  const resize = () => {
+    const w = stage.clientWidth, h = stage.clientHeight;
+    renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix();
+  };
+  new ResizeObserver(resize).observe(stage); resize();
+  renderer.setAnimationLoop(() => { controls.update(); renderer.render(scene, camera); });
+
+  // ── генератор в фоновом процессе: страница не замирает; каждая сборка — свежий процесс ──
+  const WORKER_MAIN = `
+self.onmessage = async (e) => {
+  try {
+    const { P, wasm: bin } = e.data;
+    const wasm = await self.ManifoldModule({ wasmBinary: bin, locateFile: (p) => p });
+    wasm.setup();
+    const t = performance.now();
+    const B = self.LEPESTOK.build(P, wasm);
+    const { Manifold } = wasm, tr = [];
+    const pack = (m) => {
+      const g = m.getMesh(), np = g.numProp, vp = g.vertProperties;
+      const pos = new Float32Array((vp.length / np) * 3);
+      for (let i = 0, j = 0; i < vp.length; i += np, j += 3) { pos[j] = vp[i]; pos[j + 1] = vp[i + 1]; pos[j + 2] = vp[i + 2]; }
+      const idx = new Uint32Array(g.triVerts); tr.push(pos.buffer, idx.buffer);
+      return { pos, idx };
+    };
+    const parts = {
+      brass: pack(Manifold.compose([B.hubView, B.hubPlate, B.screws, ...B.petalsView, ...B.lamps.map((l) => l.plate), ...B.lamps.map((l) => l.socket)])),
+      bulb: pack(Manifold.compose(B.lamps.map((l) => l.bulb))),
+      seam: B.seams ? pack(B.seams) : null,
+    };
+    self.postMessage({ type: 'done', parts, passport: B.passport, warn: B.warn, ms: performance.now() - t }, tr);
+  } catch (err) {
+    self.postMessage({ type: 'error', message: String((err && err.message) || err) });
+  }
+};`;
+  const workerUrl = URL.createObjectURL(new Blob([
+    $('src-manifold').textContent, '\n', $('src-core').textContent, '\n', WORKER_MAIN,
+  ], { type: 'text/javascript' }));
+  const wasmBytes = Uint8Array.from(atob(window.__MANIFOLD_WASM__), (c) => c.charCodeAt(0));
+
+  function paramsNow() {
+    const P = JSON.parse(JSON.stringify(window.__PARAMS__));
+    P.diameter = state.diam; P.seed = state.seed;
+    Object.assign(P.petal, { step_s: 4, profile_pts: 24, rim_pts: 5 });   // превью: сетка грубее
+    return P;
+  }
+
+  const geoOf = (m) => {
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(m.pos, 3));
+    geo.setIndex(new THREE.BufferAttribute(m.idx, 1));
+    geo.computeVertexNormals(); geo.computeBoundingBox();
+    return geo;
+  };
+
+  function show(res) {
+    if (group) { scene.remove(group); group.traverse((o) => o.geometry && o.geometry.dispose()); }
+    group = new THREE.Group();
+    const body = new THREE.Mesh(geoOf(res.parts.brass), brass); group.add(body);
+    group.add(new THREE.Mesh(geoOf(res.parts.bulb), bulbMat));
+    seamMesh = res.parts.seam ? new THREE.Mesh(geoOf(res.parts.seam), seamMat) : null;
+    if (seamMesh) { seamMesh.visible = state.seams; group.add(seamMesh); }
+    const bb = body.geometry.boundingBox;
+    const zTop = 0, zBot = res.passport.size.low_z, Rmax = state.diam / 2;
+    // штанга от верха вазы (внутри вазы она уходит до пластины) и чаша
+    const rod = new THREE.Mesh(new THREE.CylinderGeometry(6, 6, state.rod, 16), brass);
+    rod.rotation.x = Math.PI / 2; rod.position.z = zTop + state.rod / 2; group.add(rod);
+    const cup = new THREE.Mesh(new THREE.CylinderGeometry(45, 36, 25, 40), brass);
+    cup.rotation.x = Math.PI / 2; cup.position.z = zTop + state.rod + 12; group.add(cup);
+    group.scale.setScalar(0.001);
+    group.rotation.x = -Math.PI / 2;                          // Z генератора — вверх
+    scene.add(group);
+    glow.position.set(0, (zBot + zTop) / 2000 + 0.05, 0);
+    const R = Rmax / 1000, H = (zTop - Math.min(zBot, bb.min.z)) / 1000, zc = (zTop + zBot) / 2000;
+    const fit = Math.max(R, H * 0.62) * 1.3 / Math.sin((camera.fov * Math.PI) / 360) / Math.min(1, camera.aspect);
+    controls.target.set(0, zc + H * 0.05, 0);
+    camera.position.set(0.66 * fit, zc + 0.12 * fit, 0.75 * fit);
+  }
+
+  function passportView(res) {
+    const q = res.passport, M = q.mass_kg, kg = (x) => `${x.toFixed(1)} кг`;
+    const rows = [
+      ['Латунь (без чаши)', kg(M.total_without_cup), true],
+      ['Рожки', `12 шт. · 2 яруса · ${kg(M.petals)}`],
+      ['Узел-ваза', kg(M.hub)],
+      ['Габарит', `Ø${q.size.diameter_mm} · корпус ${q.size.body_h_mm} мм`],
+      ['Отливок', q.pieces === 2 ? '24 куска + узел' : '12 рожков + узел'],
+      ['Швов', q.pieces === 2 ? '12 (ножка + лист)' : 'нет'],
+      ['Уклон под съём', q.pieces === 2 ? `ножка ≥ ${q.draft_deg.stem_min}° · лист ≥ ${q.draft_deg.blade_min}°` : `≥ ${q.draft_deg.petals_min}°`],
+      ['Крепление', M.mount],
+      ['Центр тяжести от оси', `${q.com_offset_mm.toFixed(1)} мм`],
+      ['Лампы', '12 × E14 (условно)'],
+      ['Подвес', `${(state.rod / 1000).toFixed(1)} м`],
+      ['Собрано за', `${(res.ms / 1000).toFixed(1)} с`],
+    ];
+    $('passport').innerHTML = rows.map(([k, v, big]) => `<dt>${k}</dt><dd${big ? ' class="big"' : ''}>${v}</dd>`).join('');
+  }
+
+  let worker = null, jobId = 0, tick = 0;
+  function run() {
+    if (worker) { worker.terminate(); worker = null; }
+    const id = ++jobId;
+    const P = paramsNow();
+    const label = `Генерирую · Ø${state.diam}, зерно ${state.seed}`;
+    const t0 = performance.now();
+    busy.hidden = false; busyText.textContent = label + '…';
+    clearInterval(tick);
+    tick = setInterval(() => { busyText.textContent = `${label} · ${Math.floor((performance.now() - t0) / 1000)} с`; }, 250);
+    const done = () => { clearInterval(tick); if (worker) worker.terminate(); worker = null; busy.hidden = true; };
+    try {
+      worker = new Worker(workerUrl, { type: 'module' });
+    } catch (e) {
+      done(); $('warns').innerHTML = '<span class="chip">Браузер не умеет считать в фоне — обновите его (Chrome, Edge, Safari 15+, Firefox 114+).</span>';
+      return;
+    }
+    worker.onmessage = (e) => {
+      if (id !== jobId) return;
+      const m = e.data; done();
+      if (m.type === 'done') {
+        last = m; show(m); passportView(m);
+        $('warns').innerHTML = m.warn.length ? m.warn.map((x) => `<span class="chip">${x}</span>`).join('') : '<span class="chip ok">все проверки пройдены</span>';
+        $('stageSub').textContent = `Ø${state.diam} · 12 лепестков · зерно ${state.seed}`;
+      } else {
+        $('warns').innerHTML = `<span class="chip">Не собралось: ${m.message}. Поменяйте ширину или нажмите «Ещё вариант».</span>`;
+      }
+    };
+    worker.onerror = (e) => {
+      if (id !== jobId) return;
+      done(); $('warns').innerHTML = `<span class="chip">Генератор остановился: ${e.message || 'ошибка в фоновом процессе'}.</span>`;
+    };
+    worker.postMessage({ P, wasm: wasmBytes });
+  }
+
+  const pressed = (ids, on) => ids.forEach((i) => $(i).setAttribute('aria-pressed', String(i === on)));
+  let timer = 0;
+  const later = () => { clearTimeout(timer); timer = setTimeout(run, 300); };
+  $('diam').oninput = (e) => { state.diam = +e.target.value; $('diamOut').textContent = state.diam + ' мм'; };
+  $('diam').onchange = later;
+  $('rod').oninput = (e) => { state.rod = +e.target.value; $('rodOut').textContent = (state.rod / 1000).toFixed(1) + ' м'; };
+  $('rod').onchange = () => { if (last) { show(last); passportView(last); } };
+  const setSeams = (on) => { state.seams = on; pressed(['seam-off', 'seam-on'], on ? 'seam-on' : 'seam-off'); if (seamMesh) seamMesh.visible = on; };
+  $('seam-off').onclick = () => setSeams(false);
+  $('seam-on').onclick = () => setSeams(true);
+  $('again').onclick = () => { state.seed += 1; $('seed').textContent = state.seed; run(); };
+  run();
+})();
+</script>
