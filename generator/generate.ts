@@ -16,45 +16,93 @@ async function main() {
   const P = JSON.parse(readFileSync(resolve(paramsPath), 'utf8'));
   const wasm = await Module();
   wasm.setup();
-  const { body, passport: base, tag, warn, massOf, panelCtx, L, armDeg, t0 } = build(P, wasm);
-
-  // ── 7. вывод: изделие целиком ──
+  const { Manifold } = wasm;
+  const t0 = Date.now();
   mkdirSync(resolve(outDir), { recursive: true });
-  const ntri = writeStl(join(resolve(outDir), `${tag}.stl`), body.getMesh(), 0.001, tag);   // метры (1 BU = 1 м)
 
-  // ── 8. панели под печать мастер-моделей ──
+  // «Двойной» (09, мастер 2026-09-27): два шара на одной оси. Верхний — с площадкой и на нижнем полюсе
+  // (труба выходит вниз, зажим шайбами); в его кольце — стыковочная муфта M12×1, от неё труба держит
+  // нижний шар так же, как держится верхний. Между шарами — декоративная трубка Ø26, зазор регулируемый.
+  const double = P.composition === 'double';
+  const D2 = P.double ?? {};
+  const parts = double
+    ? [{ P: { ...P, diameter: D2.upper_d ?? P.diameter, bottom_seat: true }, name: 'верхний' },
+       { P: { ...P, diameter: D2.lower_d ?? P.diameter, seed: P.seed + 1000 }, name: 'нижний' }]
+    : [{ P, name: '' }];
+  const built = parts.map((pt) => ({ ...pt, r: build(pt.P, wasm) }));
+  // нижний шар — под верхним: центры разнесены на радиусы + зазор между площадками
+  const zOff = double ? -((D2.upper_d ?? P.diameter) / 2 + (D2.gap_mm ?? 150) + (D2.lower_d ?? P.diameter) / 2) : 0;
+  const tag = double ? `cell-${P.style}-double-${D2.upper_d ?? P.diameter}+${D2.lower_d ?? P.diameter}-seed${P.seed}` : built[0].r.tag;
+
+  // ── изделие целиком ──
+  const bodies = built.map((b, i) => (i === 1 ? b.r.body.translate([0, 0, zOff]) : b.r.body));
+  const whole = bodies.length > 1 ? Manifold.compose(bodies) : bodies[0];
+  const ntri = writeStl(join(resolve(outDir), `${tag}.stl`), whole.getMesh(), 0.001, tag);   // метры (1 BU = 1 м)
+
+  // ── панели: каждый шар режется сам, номера сквозные ──
   let panelInfo: any = 'выключено (panels.enabled = false)';
+  const warn: string[] = [];
+  built.forEach((b) => warn.push(...b.r.warn.map((w: string) => (b.name ? `${b.name}: ${w}` : w))));
   if (P.panels?.enabled) {
-    const res = cutPanels(panelCtx());
-    warn.push(...res.warn);
-
     const pdir = join(resolve(outDir), `${tag}.panels`);
     rmSync(pdir, { recursive: true, force: true });
     mkdirSync(join(pdir, 'print'), { recursive: true });
     mkdirSync(join(pdir, 'view'), { recursive: true });
-    const rows = res.panels.map((p: any) => {
-      writeStl(join(pdir, 'print', `${p.id}.stl`), p.print.getMesh(), 1, `${tag} ${p.id} mm x${res.shrink}`);   // мм, с усадкой
-      writeStl(join(pdir, 'view', `${p.id}.stl`), p.view.getMesh(), 0.001, `${tag} ${p.id} view`);              // метры, на месте
-      return { id: p.id, 'масса, кг': +massOf(p.vol).toFixed(2), 'печать, мм': p.size.map((x: number) => Math.round(x)), швов: p.cuts, номер: p.label,
-        'номер, направление': p.labelAt ? p.labelAt.map((x: number) => +x.toFixed(4)) : null, 'центр, направление': p.axis.map((x: number) => +x.toFixed(4)) };
+    let n0 = 1, loss = 0;
+    const rows: any[] = [], seams: any[] = [], steps: any[] = [];
+    const sizes: number[] = [];
+    let note = '';
+    built.forEach((b, bi) => {
+      const res = cutPanels({ ...b.r.panelCtx(), numStart: n0 });
+      warn.push(...res.warn.map((w: string) => (b.name ? `${b.name}: ${w}` : w)));
+      note = res.labelNote;
+      for (const p of res.panels) {
+        writeStl(join(pdir, 'print', `${p.id}.stl`), p.print.getMesh(), 1, `${tag} ${p.id} mm x${res.shrink}`);   // мм, с усадкой
+        const v = bi === 1 ? p.view.translate([0, 0, zOff]) : p.view;
+        writeStl(join(pdir, 'view', `${p.id}.stl`), v.getMesh(), 0.001, `${tag} ${p.id} view`);                  // метры, на месте
+        sizes.push(Math.max(p.size[0], p.size[1]));
+        rows.push({ id: p.id, ...(b.name ? { шар: b.name } : {}), 'масса, кг': +b.r.massOf(p.vol).toFixed(2), 'печать, мм': p.size.map((x: number) => Math.round(x)),
+          швов: p.cuts, номер: p.label, 'номер, направление': p.labelAt ? p.labelAt.map((x: number) => +x.toFixed(4)) : null,
+          'центр, направление': p.axis.map((x: number) => +x.toFixed(4)) });
+      }
+      seams.push(...res.seams.map((sm: any) => ({ ...sm, ...(b.name ? { шар: b.name } : {}) })));
+      steps.push(...res.steps.map((st: any) => ({ ...st, ...(b.name ? { шар: b.name } : {}) })));
+      loss += (b.r.body.volume() - res.volSum) / 1000 * P.brass_density_g_cm3;
+      n0 += res.panels.length;
     });
     const heavy = rows.reduce((a: any, b: any) => (b['масса, кг'] > a['масса, кг'] ? b : a));
-    const big = Math.max(...res.panels.map((p: any) => Math.max(p.size[0], p.size[1])));
     panelInfo = {
-      панелей: rows.length, швов: res.seams.length,
+      панелей: rows.length, швов: seams.length,
       'самая тяжёлая': `${heavy.id}, ${heavy['масса, кг']} кг`,
-      'наибольший размер на столе, мм': Math.round(big),
-      'стол, мм': P.panels.bed_mm, 'усадка, %': P.panels.shrink_pct,
-      'потеря на резах, г': Math.round((body.volume() - res.volSum) / 1000 * P.brass_density_g_cm3),
+      'наибольший размер на столе, мм': Math.round(Math.max(...sizes)),
+      'стол, мм': P.panels.bed_mm, 'усадка, %': P.panels.shrink_pct, 'потеря на резах, г': Math.round(loss),
       файлы: `${tag}.panels/print/*.stl (мм, с усадкой) · view/*.stl (м, на месте) · panels.json`,
+      'номера на панелях': note,
+      ...(double ? { сборка: 'каждый шар собирается отдельно (верхний — с P01, нижний — со своей первой панели), потом нижний вешается на трубу' } : {}),
     };
-    panelInfo['номера на панелях'] = res.labelNote;
-    writeFileSync(join(pdir, 'panels.json'), JSON.stringify({ изделие: tag, ...panelInfo, сборка: res.steps, панели: rows, швы: res.seams }, null, 2));
+    writeFileSync(join(pdir, 'panels.json'), JSON.stringify({ изделие: tag, ...panelInfo, сборка: steps, панели: rows, швы: seams }, null, 2));
   }
 
-  const passport = { ...base, треугольников: ntri, панели: panelInfo, 'время, с': +((Date.now() - t0) / 1000).toFixed(1), предупреждения: warn };
+  // ── паспорт ──
+  let passport: any;
+  if (!double) {
+    passport = { ...built[0].r.passport, треугольников: ntri, панели: panelInfo, 'время, с': +((Date.now() - t0) / 1000).toFixed(1), предупреждения: warn };
+  } else {
+    const [up, lo] = built.map((b) => b.r.passport);
+    const mFrame = up['масса каркаса, кг'] + lo['масса каркаса, кг'];
+    const mTotal = up['масса в сборе, кг (оснащение условно)'] + lo['масса в сборе, кг (оснащение условно)'];
+    passport = {
+      изделие: tag, семейство: P.family, форма: '09 «Двойной» — два шара на одной оси', вид: up['вид'], узор: up['узор'], зерно: P.seed,
+      'верхний шар': up, 'нижний шар': lo,
+      'масса каркасов, кг': +mFrame.toFixed(2), 'масса в сборе, кг (оснащение условно)': +mTotal.toFixed(2),
+      'труба': 'M12, стенка 2 мм — сквозь оба шара; в кольце верхнего — стыковочная муфта M12×1',
+      крепление: mTotal > P.heavy_mount_kg ? 'усиленное (> 15 кг)' : 'обычное',
+      'между шарами, мм': `${D2.gap_mm ?? 150} (регулируемо), декоративная трубка Ø${D2.sleeve_d ?? 26}`,
+      треугольников: ntri, панели: panelInfo, 'время, с': +((Date.now() - t0) / 1000).toFixed(1), предупреждения: warn,
+    };
+  }
   writeFileSync(join(resolve(outDir), `${tag}.passport.json`), JSON.stringify(passport, null, 2));
-  writeFileSync(join(resolve(outDir), `${tag}.rozhok_1to1.svg`), bendTemplate(L, armDeg, tag));
+  built.forEach((b) => writeFileSync(join(resolve(outDir), `${tag}${b.name ? '.' + b.name : ''}.rozhok_1to1.svg`), bendTemplate(b.r.L, b.r.armDeg, tag + (b.name ? ' · ' + b.name : ''))));
   console.log(JSON.stringify(passport, null, 2));
 }
 

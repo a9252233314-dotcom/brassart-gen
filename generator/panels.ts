@@ -61,7 +61,8 @@ export function cutPanels(ctx: any) {
       e.off = (s0 + s1) / 2; e.wReal = s1 - s0;
     }
     const clear = G ? Math.min(len(sub(pm, surf(a))), len(sub(pm, surf(b)))) : Math.min(t, 1 - t) * ang * Rm;
-    const fromPole = G ? len(sub(pm, surf([0, 0, 1]))) : angle(e.m, [0, 0, 1]) * Rm;
+    let fromPole = G ? len(sub(pm, surf([0, 0, 1]))) : angle(e.m, [0, 0, 1]) * Rm;
+    if (ctx.bottomSeat) fromPole = Math.min(fromPole, G ? len(sub(pm, surf([0, 0, -1]))) : angle(e.m, [0, 0, -1]) * Rm);   // и нижняя площадка
     // отступ от узла: cut_node_clear_mm, но на коротких рёбрах (мелкие ячейки у края) — доля длины, не меньше cut_node_clear_min_mm
     const needClear = Math.max(C.cut_node_clear_min_mm ?? C.cut_node_clear_mm, Math.min(C.cut_node_clear_mm, 0.3 * Lr));
     e.cut = e.w <= C.cut_max_width_mm && clear >= needClear && fromPole >= seatR + C.cut_node_clear_mm;
@@ -384,7 +385,7 @@ export function cutPanels(ctx: any) {
       for (const n of myNodes) {
         const nd = nodes[n];
         const pIn = inner(nd), n0 = nrm(nd);
-        if ((G ? Math.hypot(pIn[0], pIn[1]) : angle(nd, [0, 0, 1]) * Rin) < seatR + Math.hypot(hx, hy) + 6) continue;   // не на площадке полюса
+        if ((G ? Math.hypot(pIn[0], pIn[1]) : Math.min(angle(nd, [0, 0, 1]), ctx.bottomSeat ? angle(nd, [0, 0, -1]) : 9) * Rin) < seatR + Math.hypot(hx, hy) + 6) continue;   // не на площадках полюсов
         const [t1, t2] = tangentBasis(G ? n0 : nd);
         for (const [ox, oy] of [[0, 0], [4, 0], [-4, 0], [0, 4], [0, -4], [3, 3], [-3, 3], [3, -3], [-3, -3], [8, 0], [-8, 0], [0, 8], [0, -8]]) {
           const c = G ? n0 : norm(add(mul(nd, Rin), add(mul(t1, ox), mul(t2, oy))));
@@ -446,7 +447,8 @@ export function cutPanels(ctx: any) {
       order.push(bq); rest.delete(bq);
     }
     const idOf = new Map(order.map((q, i) => [q, i]));
-    const pid = (i: number) => `P${String(i + 1).padStart(2, '0')}`;
+    const n0 = ctx.numStart ?? 1;                            // «Двойной»: номера нижнего шара продолжают верхний
+    const pid = (i: number) => `P${String(i + n0).padStart(2, '0')}`;
     const nodePanel = new Int32Array(nN);
     for (let a = 0; a < nA; a++) for (const n of aNodes[a]) nodePanel[n] = idOf.get(lab[a])!;
 
@@ -496,7 +498,7 @@ export function cutPanels(ctx: any) {
       const myNodes: number[] = [];
       for (let n = 0; n < nN; n++) if (nodePanel[n] === i) myNodes.push(n);
       const myCuts: V3[] = cuts.filter((c: any) => nodePanel[c.e.n1] === i || nodePanel[c.e.n2] === i).map((c: any) => c.e.m);
-      const text = String(i + 1).padStart(2, '0');
+      const text = String(i + n0).padStart(2, '0');
       const pl = placeLabel(text, myNodes, myCuts);
       if (!pl) { noLabel.push(pid(i)); continue; }
       pn.m = pn.m.add(labelSolid(text, pl));

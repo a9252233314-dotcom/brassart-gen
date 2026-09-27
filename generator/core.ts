@@ -151,7 +151,7 @@ export function build(P: any, wasm: any) {
   // лампы: точки по оси патрона и колбы с радиусом (капсула) — для выбора формы и проверки зазора
   let Lp: any = { ...P.lamps, socket_name: P.lamps.socket_name ?? 'E27', bulb_name: P.lamps.bulb_name ?? 'A60' };
   const lampTiers: { direction: string; count: number }[] = Lp.tiers ?? [{ direction: Lp.direction, count: Lp.count }];
-  const single = (lampTiers.reduce((s0, t) => s0 + t.count, 0) === 1) && P.lamps.single_center !== false;
+  const single = (lampTiers.reduce((s0, t) => s0 + t.count, 0) === 1) && P.lamps.single_center !== false && !P.bottom_seat;
   const capsFor = (deg: number) => {
   if (single) {                                               // колба по центру, патрон над ней, всё на оси
     const out: { q: V3; r: number }[] = [];
@@ -279,6 +279,15 @@ export function build(P: any, wasm: any) {
     seeds.push([Math.sin(ringAng) * Math.cos(phi), Math.sin(ringAng) * Math.sin(phi), Math.cos(ringAng)]);
     fixed.push(true);
   }
+  // нижняя площадка (верхний шар «Двойного»): такое же кольцо точек у нижнего полюса — рёбра сходятся лучами
+  const botSeat = !!P.bottom_seat;
+  if (botSeat) for (let k = 0; k < P.pole_ribs; k++) {
+    const phi = ringRot + (2 * Math.PI * (k + 0.5)) / P.pole_ribs;
+    seeds.push([Math.sin(ringAng) * Math.cos(phi), Math.sin(ringAng) * Math.sin(phi), -Math.cos(ringAng)]);
+    fixed.push(true);
+  }
+  const nFixed = seeds.length;
+  const inPole = (p: V3) => Math.acos(Math.max(-1, Math.min(1, p[2]))) < poleClear || (botSeat && Math.acos(Math.max(-1, Math.min(1, -p[2]))) < poleClear);
   const nFib = Math.round(nCells * 1.02);
   for (let i = 0; i < nFib && seeds.length < nCells; i++) {
     const z = 1 - (2 * (i + 0.5)) / nFib, r = Math.sqrt(1 - z * z), phi = i * golden;
@@ -286,14 +295,14 @@ export function build(P: any, wasm: any) {
     const [e1, e2] = tangentBasis(p);
     const j = cellAng * P.cell_jitter;
     p = norm(add(p, add(mul(e1, (rand() - 0.5) * j), mul(e2, (rand() - 0.5) * j))));
-    if (Math.acos(Math.min(1, dot(p, north))) < poleClear) continue;
+    if (inPole(p)) continue;
     seeds.push(p); fixed.push(false);
   }
 
   if (general && stretch === 1) {
-    seeds.length = P.pole_ribs; fixed.length = P.pole_ribs;
-    const cand = samples.map((q, i) => ({ i, w: Math.acos(Math.min(1, q.x[2])) < poleClear ? 0 : q.wt / hAt(q.k) ** 2 }));
-    const tot = cand.reduce((a0, c) => a0 + c.w, 0), need = nCells - P.pole_ribs, step = tot / need;
+    seeds.length = nFixed; fixed.length = nFixed;
+    const cand = samples.map((q, i) => ({ i, w: inPole(q.x) ? 0 : q.wt / hAt(q.k) ** 2 }));
+    const tot = cand.reduce((a0, c) => a0 + c.w, 0), need = nCells - nFixed, step = tot / need;
     let acc = step * rand(), sum = 0;
     for (const c of cand) { sum += c.w; while (sum >= acc && seeds.length < nCells) { seeds.push(samples[c.i].x); fixed.push(false); acc += step; } }
   }
@@ -333,7 +342,7 @@ export function build(P: any, wasm: any) {
     const rows = (sp: number) => {
       const rr = rng(P.seed * 31 + 7), out: V3[] = [];
       const dv = along ? stretch * sp : sp, dh = along ? sp : stretch * sp;   // между поясами / в поясе
-      for (let th = ringAng + dv, j = 0; th < Math.PI - 0.5 * dv; th += dv, j++) {
+      for (let th = ringAng + dv, j = 0; th < Math.PI - 0.5 * dv - (botSeat ? ringAng : 0); th += dv, j++) {
         const n = Math.max(3, Math.round((2 * Math.PI * Math.sin(th)) / dh));
         const off = rr();                                       // сдвиг пояса случайный — без сплошных колец
         for (let i = 0; i < n; i++) {
@@ -341,12 +350,12 @@ export function build(P: any, wasm: any) {
           out.push([Math.sin(t) * Math.cos(phi), Math.sin(t) * Math.sin(phi), Math.cos(t)]);
         }
       }
-      out.push([0, 0, -1]);                                  // нижний полюс
+      if (!botSeat) out.push([0, 0, -1]);                    // нижний полюс (если там нет площадки)
       return out;
     };
     let lo = 0.02, hi = 3;
-    for (let it = 0; it < 40; it++) { const mid = (lo + hi) / 2; if (P.pole_ribs + rows(mid).length > nCells) lo = mid; else hi = mid; }
-    seeds.length = P.pole_ribs; fixed.length = P.pole_ribs;
+    for (let it = 0; it < 40; it++) { const mid = (lo + hi) / 2; if (nFixed + rows(mid).length > nCells) lo = mid; else hi = mid; }
+    seeds.length = nFixed; fixed.length = nFixed;
     for (const p of rows(hi)) { seeds.push(p); fixed.push(false); }
   }
   if (general) {
@@ -377,7 +386,7 @@ export function build(P: any, wasm: any) {
       for (let k = 0; k < seeds.length; k++) {
         if (fixed[k] || !cnt[k]) continue;
         const qd = norm(sum[k]);
-        if (Math.acos(Math.min(1, dot(qd, north))) >= poleClear) seeds[k] = qd;
+        if (!inPole(qd)) seeds[k] = qd;
       }
     }
   } else if (stretch === 1) {
@@ -389,7 +398,7 @@ export function build(P: any, wasm: any) {
         let c: V3 = [0, 0, 0];
         incident[k].forEach((t) => (c = add(c, vv[t])));
         const q = norm(c);
-        if (Math.acos(Math.min(1, dot(q, north))) >= poleClear) seeds[k] = q;
+        if (!inPole(q)) seeds[k] = q;
       }
     }
   } else {
@@ -420,7 +429,7 @@ export function build(P: any, wasm: any) {
       for (let k = 0; k < seeds.length; k++) {
         if (fixed[k] || !cnt[k]) continue;
         const q = norm(sum[k]);
-        if (Math.acos(Math.min(1, dot(q, north))) >= poleClear) seeds[k] = q;
+        if (!inPole(q)) seeds[k] = q;
       }
     }
   }
@@ -623,11 +632,17 @@ export function build(P: any, wasm: any) {
   const seatR = P.pole_seat_d / 2;
   body = body.subtract(Manifold.cylinder(60, seatR, seatR, 96).translate([0, 0, seatTop]));   // срезать всё выше посадки
   body = body.add(Manifold.cylinder(seatTop - seatBottom, seatR, seatR, 96).translate([0, 0, seatBottom]));
+  if (botSeat) {                                              // зеркально внизу: плоско сверху и снизу, под шайбы
+    const rBot = rho([0, 0, -1]), bOut = -(rBot + T / 2), bIn = -(rBot - T / 2 - 2);
+    body = body.subtract(Manifold.cylinder(60, seatR, seatR, 96).translate([0, 0, bOut - 60]));
+    body = body.add(Manifold.cylinder(bIn - bOut, seatR, seatR, 96).translate([0, 0, bOut]));
+  }
 
   const massOf = (vol: number) => (vol / 1000) * P.brass_density_g_cm3 / 1000;
   const massFrame0 = massOf(body.volume());
   const tube = massFrame0 + P.accessories_kg > P.tube_switch_kg ? { name: 'M12, стенка 2 мм', od: 12 } : { name: 'M10×1', od: 10 };
   body = body.subtract(Manifold.cylinder(seatTop - seatBottom + 40, tube.od / 2 + 0.3, tube.od / 2 + 0.3, 48).translate([0, 0, seatBottom - 20]));
+  if (botSeat) body = body.subtract(Manifold.cylinder(2 * seatTop + 80, tube.od / 2 + 0.3, tube.od / 2 + 0.3, 48).translate([0, 0, -seatTop - 40]));   // труба насквозь
 
   const massFrame = massOf(body.volume());
   // центр тяжести каркаса — от оси (люстра должна висеть ровно)
@@ -703,7 +718,7 @@ export function build(P: any, wasm: any) {
     }
     const width = (e: any, w: V3) => sdHole(cells[e.cA], w[0], w[1], w[2]) + sdHole(cells[e.cB], w[0], w[1], w[2]);
     return { Manifold, P, R, Rm, Rin, T, re, seatR, nodes, edges, width, metalU, body,
-      general, surf: general ? surf : undefined, nrm: general ? normalAt : undefined, area };
+      general, surf: general ? surf : undefined, nrm: general ? normalAt : undefined, area, bottomSeat: botSeat };
   };
   const passport = {
     изделие: tag, семейство: P.family, вид: style === 'facet' ? 'гранёный' : 'плавный', узор: drops ? '«капли» (вытянутые)' : bands ? '«ленты» (вытянуты по кругу)' : 'круглые ячейки', зерно: P.seed, форма: P.shape,
