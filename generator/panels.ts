@@ -50,11 +50,58 @@ export function cutPanels(ctx: any) {
       e.tan = norm(sub(t0, mul(e.n, dot(t0, e.n))));
     }
     const pm = surf(e.m);
+    if (G) {
+      // на изогнутой форме настоящее ребро чуть смещено от линии Вороного — найти его поперёк и резать по нему
+      const g = cross(e.n, e.tan), inside = (sN: number) => { const q = norm(add(pm, mul(g, sN))); return ctx.metalU(q[0], q[1], q[2]) > 0; };
+      let a0 = 0;
+      if (!inside(0)) for (let d = 0.5; d <= 12; d += 0.5) { if (inside(d)) { a0 = d; break; } if (inside(-d)) { a0 = -d; break; } }
+      let s0 = a0, s1 = a0;
+      while (s0 > -40 && inside(s0 - 0.5)) s0 -= 0.5;
+      while (s1 < 40 && inside(s1 + 0.5)) s1 += 0.5;
+      e.off = (s0 + s1) / 2; e.wReal = s1 - s0;
+    }
     const clear = G ? Math.min(len(sub(pm, surf(a))), len(sub(pm, surf(b)))) : Math.min(t, 1 - t) * ang * Rm;
     const fromPole = G ? len(sub(pm, surf([0, 0, 1]))) : angle(e.m, [0, 0, 1]) * Rm;
     // отступ от узла: cut_node_clear_mm, но на коротких рёбрах (мелкие ячейки у края) — доля длины, не меньше cut_node_clear_min_mm
     const needClear = Math.max(C.cut_node_clear_min_mm ?? C.cut_node_clear_mm, Math.min(C.cut_node_clear_mm, 0.3 * Lr));
     e.cut = e.w <= C.cut_max_width_mm && clear >= needClear && fromPole >= seatR + C.cut_node_clear_mm;
+  }
+
+  const belt = G && C.belt !== false;
+  const upFacing = (w: V3) => nrm(w)[2] >= 0;
+  // линия пояса: по каждому азимуту — первое место сверху, где стенка перестаёт смотреть вверх;
+  // верх/низ — по положению относительно этой линии (а не по наклону в точке: у «вздутий» он скачет)
+  const NB = 240, beltTh = new Float64Array(NB);
+  if (belt) for (let i = 0; i < NB; i++) {
+    const ph = (2 * Math.PI * i) / NB, c = Math.cos(ph), sn = Math.sin(ph);
+    const dir = (th: number): V3 => [Math.sin(th) * c, Math.sin(th) * sn, Math.cos(th)];
+    let th0 = 0.05;
+    while (th0 < Math.PI - 0.05 && upFacing(dir(th0))) th0 += 0.02;
+    let lo = th0 - 0.02, hi = th0;
+    for (let k = 0; k < 30; k++) { const mid = (lo + hi) / 2; if (upFacing(dir(mid))) lo = mid; else hi = mid; }
+    beltTh[i] = (lo + hi) / 2;
+  }
+  const beltAt = (ph: number) => {
+    const f = (((ph / (2 * Math.PI)) % 1) + 1) % 1 * NB, i = Math.floor(f) % NB, t = f - Math.floor(f);
+    return beltTh[i] * (1 - t) + beltTh[(i + 1) % NB] * t;
+  };
+  const side = (w: V3) => (Math.acos(Math.max(-1, Math.min(1, w[2]))) <= beltAt(Math.atan2(w[1], w[0])) ? 1 : -1);
+  if (belt) for (const e of edges) {
+    const a = nodes[e.n1], b = nodes[e.n2];
+    if (side(a) === side(b)) continue;
+    let lo = 0, hi = 1;                                       // где на ребре стенка вертикальна
+    for (let k = 0; k < 30; k++) { const mid = (lo + hi) / 2; if (side(slerp(a, b, mid)) === side(a)) lo = mid; else hi = mid; }
+    const tb = (lo + hi) / 2, Le = len(sub(surf(a), surf(b))), dt = Math.min(0.45, (C.belt_window_mm ?? 15) / Math.max(Le, 1));
+    let t = tb, wb = Infinity;
+    for (let k = -10; k <= 10; k++) { const tt = Math.max(0.02, Math.min(0.98, tb + (dt * k) / 10)), wv = width(e, slerp(a, b, tt)); if (wv < wb) { wb = wv; t = tt; } }
+    e.belt = true; e.cut = true;
+    e.m = slerp(a, b, t); e.n = nrm(e.m); e.w = wb;
+    { const pmb = surf(e.m), g0 = cross(e.n, norm(sub(surf(slerp(a, b, Math.min(1, t + 0.01))), surf(slerp(a, b, Math.max(0, t - 0.01))))));
+      const g = norm(g0), inside = (sN: number) => { const q = norm(add(pmb, mul(g, sN))); return ctx.metalU(q[0], q[1], q[2]) > 0; };
+      let s0 = 0, s1 = 0; while (s0 > -60 && inside(s0 - 0.5)) s0 -= 0.5; while (s1 < 60 && inside(s1 + 0.5)) s1 += 0.5;
+      e.off = (s0 + s1) / 2; e.wReal = s1 - s0; }
+    const t0 = sub(surf(slerp(a, b, Math.min(1, t + 0.01))), surf(slerp(a, b, Math.max(0, t - 0.01))));
+    e.tan = norm(sub(t0, mul(e.n, dot(t0, e.n))));
   }
 
   // ── 2. «атомы»: узлы, связанные нережущимися рёбрами, всегда в одной панели ──
@@ -67,8 +114,12 @@ export function cutPanels(ctx: any) {
   const aNodes: number[][] = roots.map(() => []);
   for (let i = 0; i < nN; i++) aNodes[aOf.get(find(i))!].push(i);
   const aDir: V3[] = aNodes.map((ns) => norm(ns.reduce((s: V3, i) => add(s, nodes[i]), [0, 0, 0] as V3)));
-  const cands = edges.filter((e: any) => e.cut && find(e.n1) !== find(e.n2))
+  const cands = edges.filter((e: any) => e.cut && !e.belt && find(e.n1) !== find(e.n2))
     .map((e: any) => ({ e, a: aOf.get(find(e.n1))!, b: aOf.get(find(e.n2))! }));
+  // поясные резы — всегда граница панели; верх и низ между собой не соседи
+  const beltCuts = edges.filter((e: any) => e.belt).map((e: any) => ({ e, a: aOf.get(find(e.n1))!, b: aOf.get(find(e.n2))! }));
+  const aBelt: V3[][] = roots.map(() => []);
+  for (const c of beltCuts) { aBelt[c.a].push(c.e.m); aBelt[c.b].push(c.e.m); }
   const inc: number[][] = roots.map(() => []);
   cands.forEach((c: any, i: number) => { inc[c.a].push(i); inc[c.b].push(i); });
   const other = (ci: number, a: number) => (cands[ci].a === a ? cands[ci].b : cands[ci].a);
@@ -79,15 +130,25 @@ export function cutPanels(ctx: any) {
     for (let a = 0; a < nA; a++) if (lab[a] === q) {
       for (const n of aNodes[a]) pts.push(nodes[n]);
       for (const ci of inc[a]) if (lab[other(ci, a)] !== q) pts.push(cands[ci].e.m);
+      for (const m of aBelt[a]) pts.push(m);
     }
     if (G) {
       const ns = pts.map(nrm), P3 = pts.map(outer);
       const axis = norm(ns.reduce((s, p) => add(s, p), [0, 0, 0] as V3));
       const [u, v] = tangentBasis(axis);
-      let arc = 0;
-      for (const n of ns) arc = Math.max(arc, angle(n, axis));
+      let arc = 0, okArc: boolean;
+      if (belt) {
+        // шов по поясу: чаша вынимается прямо вверх (верх) или вниз (низ) — поверхность не должна смотреть
+        // против вынимания (без отрицательных уклонов, мастер 2026-09-17); правило 60° здесь не нужно
+        const pull: V3 = [0, 0, ns.reduce((s0, n) => s0 + n[2], 0) >= 0 ? 1 : -1];
+        for (const n of ns) arc = Math.max(arc, angle(n, pull));
+        okArc = arc <= ((C.belt_draft_max_deg ?? 100) * Math.PI) / 180;   // у кромки кусочек ребра может чуть зайти за пояс
+      } else {
+        for (const n of ns) arc = Math.max(arc, angle(n, axis));
+        okArc = arc + pad / R <= halfArc;
+      }
       const f = fitRect(hull2(P3.map((p) => [dot(p, u), dot(p, v)] as V2)), bx, by, pad, k, step);
-      return { ok: f.ratio <= 1 && arc + pad / R <= halfArc, ratio: f.ratio, axis, arc };
+      return { ok: f.ratio <= 1 && okArc, ratio: f.ratio, axis, arc };
     }
     const axis = norm(pts.reduce((s, p) => add(s, p), [0, 0, 0] as V3));
     const [u, v] = tangentBasis(axis);
@@ -370,7 +431,7 @@ export function cutPanels(ctx: any) {
     // порядок сборки = номер панели: P01 — верхняя (с площадкой), каждая следующая — та, у которой
     // больше всего швов с уже собранными; при равенстве — что выше
     const between = new Map<string, number>();
-    for (const c of cands) { const p = lab[c.a], q = lab[c.b]; if (p !== q) { const key = p < q ? `${p},${q}` : `${q},${p}`; between.set(key, (between.get(key) ?? 0) + 1); } }
+    for (const c of [...cands, ...beltCuts]) { const p = lab[c.a], q = lab[c.b]; if (p !== q) { const key = p < q ? `${p},${q}` : `${q},${p}`; between.set(key, (between.get(key) ?? 0) + 1); } }
     const seamsBetween = (p: number, q: number) => between.get(p < q ? `${p},${q}` : `${q},${p}`) ?? 0;
     const zOf = new Map(labels.map((q) => [q, est(lab, q, pad).axis[2]]));
     const order = [lab[poleA]], rest = new Set(labels.filter((q) => q !== lab[poleA]));
@@ -389,10 +450,10 @@ export function cutPanels(ctx: any) {
     const nodePanel = new Int32Array(nN);
     for (let a = 0; a < nA; a++) for (const n of aNodes[a]) nodePanel[n] = idOf.get(lab[a])!;
 
-    const cuts = cands.filter((c: any) => lab[c.a] !== lab[c.b]);
+    const cuts = [...cands.filter((c: any) => lab[c.a] !== lab[c.b]), ...beltCuts];
     const slabs = cuts.map((c: any) => {
-      const e = c.e, t: V3 = e.tan, n: V3 = G ? e.n : e.m, g = cross(n, t), p = G ? surf(e.m) : mul(n, Rm);
-      const box = Manifold.cube([C.kerf_mm, e.w + 6, T + 6], true);
+      const e = c.e, t: V3 = e.tan, n: V3 = G ? e.n : e.m, g = cross(n, t), p = G ? add(surf(e.m), mul(g, e.off ?? 0)) : mul(n, Rm);
+      const box = Manifold.cube([C.kerf_mm, Math.max(e.w, e.wReal ?? 0) + 6, T + 6], true);
       return box.transform([t[0], t[1], t[2], 0, g[0], g[1], g[2], 0, n[0], n[1], n[2], 0, p[0], p[1], p[2], 1] as any);
     });
     const cutBody = ctx.body.subtract(Manifold.union(slabs));
@@ -418,7 +479,15 @@ export function cutPanels(ctx: any) {
       if (byId.has(p.id)) throw new Error(`панель ${p.id + 1} распалась на части — рез прошёл не там`);
       byId.set(p.id, p);
     }
-    if (byId.size !== labels.length) throw new Error(`панелей по раскладке ${labels.length}, по геометрии ${byId.size}`);
+    if (byId.size !== labels.length) {
+      if (process.env.PANEL_DEBUG) for (let i = 0; i < labels.length; i++) if (!byId.has(i)) {
+        const my = cuts.filter((c: any) => nodePanel[c.e.n1] === i || nodePanel[c.e.n2] === i);
+        console.error('нет панели', pid(i), 'узлов', [...nodePanel].filter((x) => x === i).length, 'резов', my.length,
+          JSON.stringify(my.map((c: any) => [c.e.belt ? 'пояс' : 'рез', +c.e.w.toFixed(1), Math.round(surf(c.e.m)[2])])));
+      }
+      if (process.env.PANEL_DEBUG) console.error('мелкие куски:', pieces.filter((q: any) => q.vol <= 1000).map((q: any) => Math.round(q.vol)));
+      throw new Error(`панелей по раскладке ${labels.length}, по геометрии ${byId.size}`);
+    }
 
     // номер панели — выпуклые цифры на внутренней стороне перепонки (отливаются вместе с панелью)
     const noLabel: string[] = [];
@@ -471,7 +540,7 @@ export function cutPanels(ctx: any) {
       for (const j of to) for (const c of mine.filter((c: any) => Math.min(nodePanel[c.e.n1], nodePanel[c.e.n2]) === j)) {
         const id = `S${String(seams.length + 1).padStart(2, '0')}`;
         ids.push(id);
-        seams.push({ id, шаг: i + 1, панели: [pid(j), pid(i)], 'ребро в месте реза, мм': +c.e.w.toFixed(1),
+        seams.push({ id, шаг: i + 1, панели: [pid(j), pid(i)], ...(c.e.belt ? { пояс: true } : {}), 'ребро в месте реза, мм': +c.e.w.toFixed(1),
           точка: surf(c.e.m).map((x: number) => +x.toFixed(1)) });
       }
       steps.push({ шаг: i + 1, панель: pid(i), к: to.map(pid), швы: ids.length ? `${ids[0]}–${ids[ids.length - 1]}` : '—', швов: ids.length });
