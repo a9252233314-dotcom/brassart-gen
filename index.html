@@ -1552,6 +1552,7 @@ input[type=range] { width: 100%; accent-color: var(--brass); }
     const lampTiers = Lp.tiers ?? [{ direction: Lp.direction, count: Lp.count }];
     const capsFor = (deg) => {
       const lampCaps = [];
+      const nAll = lampTiers.reduce((s0, t) => s0 + t.count, 0);
       lampTiers.forEach((t, ti) => {
         const sign = t.direction === "up" ? 1 : t.direction === "down" ? -1 : 0;
         const th = sign * (deg * Math.PI) / 180;
@@ -1559,7 +1560,7 @@ input[type=range] { width: 100%; accent-color: var(--brass); }
         const endR = Lp.ring_radius + a + rb * Math.sin(Math.abs(th)) + a * Math.cos(th);
         const endZ = Math.sign(th) * rb * (1 - Math.cos(th)) + a * Math.sin(th);
         for (let i = 0; i < t.count; i++) {
-          const ph = 2 * Math.PI * (i + 0.5 * ti) / t.count, c = Math.cos(ph), sn = Math.sin(ph);
+          const ph = 2 * Math.PI * (ti + i * lampTiers.length) / nAll, c = Math.cos(ph), sn = Math.sin(ph);
           const at = (s0) => {
             const rr = endR + s0 * Math.cos(th), zz = endZ + s0 * Math.sin(th);
             return [rr * c, rr * sn, zz];
@@ -2246,7 +2247,8 @@ self.onmessage = async (e) => {
       const endR = L.ring_radius + a + rb * Math.sin(Math.abs(th)) + a * Math.cos(th);
       const endZ = Math.sign(th) * rb * (1 - Math.cos(th)) + a * Math.sin(th);
       for (let i = 0; i < t.count; i++) {
-        const ph = 2 * Math.PI * (i + 0.5 * ti) / t.count, c = Math.cos(ph), s = Math.sin(ph);
+        const nAll = tiers.reduce((s0, x) => s0 + x.count, 0);
+        const ph = 2 * Math.PI * (ti + i * tiers.length) / nAll, c = Math.cos(ph), s = Math.sin(ph);   // все рожки через равные углы
         const at = (s0) => new THREE.Vector3((endR + s0 * Math.cos(th)) * c, (endR + s0 * Math.cos(th)) * s, endZ + s0 * Math.sin(th));
         const p0 = new THREE.Vector3(L.ring_radius * c, L.ring_radius * s, 0), p1 = at(0);
         const mid = new THREE.Vector3((L.ring_radius + a + rb * Math.sin(Math.abs(th) / 2)) * c, (L.ring_radius + a + rb * Math.sin(Math.abs(th) / 2)) * s, endZ / 2);
@@ -2275,6 +2277,10 @@ self.onmessage = async (e) => {
     const top = geo.boundingBox.max.z;
     const armDeg = +(/гиб рожков (\d+)/.exec(m.passport['лампы'] || '') || [0, 0])[1];
     group.add(lampMeshes(P, tiers, armDeg));
+    // центральная труба: от кольца в центре до полюса (M10 или M12 — из паспорта)
+    const tubeR = /M12/.test(m.passport['труба центрального узла'] || '') ? 6 : 5;
+    const pipe = new THREE.Mesh(new THREE.CylinderGeometry(tubeR, tubeR, top, 16), brass);
+    pipe.rotation.x = Math.PI / 2; pipe.position.z = top / 2; group.add(pipe);
     const rodLen = 520;
     const rod = new THREE.Mesh(new THREE.CylinderGeometry(6, 6, rodLen, 16), brass);
     rod.rotation.x = Math.PI / 2; rod.position.z = top + rodLen / 2; group.add(rod);

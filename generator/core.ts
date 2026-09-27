@@ -115,6 +115,8 @@ export function build(P: any, wasm: any) {
   const lampTiers: { direction: string; count: number }[] = Lp.tiers ?? [{ direction: Lp.direction, count: Lp.count }];
   const capsFor = (deg: number) => {
   const lampCaps: { q: V3; r: number }[] = [];
+  // все рожки — по кольцу через равные углы, ярусы чередуются (lamp k → ярус k % число ярусов)
+  const nAll = lampTiers.reduce((s0, t) => s0 + t.count, 0);
   lampTiers.forEach((t, ti) => {
     const sign = t.direction === 'up' ? 1 : t.direction === 'down' ? -1 : 0;
     const th = sign * (deg * Math.PI) / 180;
@@ -122,7 +124,7 @@ export function build(P: any, wasm: any) {
     const endR = Lp.ring_radius + a + rb * Math.sin(Math.abs(th)) + a * Math.cos(th);
     const endZ = Math.sign(th) * rb * (1 - Math.cos(th)) + a * Math.sin(th);
     for (let i = 0; i < t.count; i++) {
-      const ph = (2 * Math.PI * (i + 0.5 * ti)) / t.count, c = Math.cos(ph), sn = Math.sin(ph);
+      const ph = (2 * Math.PI * (ti + i * lampTiers.length)) / nAll, c = Math.cos(ph), sn = Math.sin(ph);
       const at = (s0: number): V3 => { const rr = endR + s0 * Math.cos(th), zz = endZ + s0 * Math.sin(th); return [rr * c, rr * sn, zz]; };
       lampCaps.push({ q: at(Lp.socket_length), r: 20 });
       for (let k = 0; k <= 4; k++) lampCaps.push({ q: at(Lp.socket_length + Lp.bulb_d / 2 + ((Lp.bulb_length - Lp.bulb_d) * k) / 4), r: Lp.bulb_d / 2 });
