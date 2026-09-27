@@ -61,6 +61,7 @@ input[type=range] { width: 100%; accent-color: var(--brass); }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip { font-size: 12px; padding: 3px 8px; border-radius: 3px; background: var(--warn-bg); color: var(--warn); }
 .chip.ok { background: var(--brass-soft); color: var(--ink); }
+.chip.stop { background: #8f2a16; color: #fff3ec; font-weight: 600; }
 .note { color: var(--muted); font-size: 12px; margin: 0; }
 @media (max-width: 860px) {
   .app { grid-template-columns: 1fr; }
@@ -2276,7 +2277,7 @@ self.onmessage = async (e) => {
     group.add(new THREE.Mesh(geo, brass));
     const top = geo.boundingBox.max.z;
     const armDeg = +(/гиб рожков (\d+)/.exec(m.passport['лампы'] || '') || [0, 0])[1];
-    group.add(lampMeshes(P, tiers, armDeg));
+    const lampsG = lampMeshes(P, tiers, armDeg); lampsG.visible = m.passport['зазор ламп до рёбер, мм'] >= 0; group.add(lampsG);
     // центральная труба: от кольца в центре до полюса (M10 или M12 — из паспорта)
     const tubeR = /M12/.test(m.passport['труба центрального узла'] || '') ? 6 : 5;
     const pipe = new THREE.Mesh(new THREE.CylinderGeometry(tubeR, tubeR, top, 16), brass);
@@ -2335,7 +2336,11 @@ self.onmessage = async (e) => {
       if (m.type === 'done') {
         show(m, P, tiers);
         passportView(m.passport, m.ms);
-        $('warns').innerHTML = m.warn.length ? m.warn.map((x) => `<span class="chip">${x}</span>`).join('') : '<span class="chip ok">все проверки пройдены</span>';
+        const gap = m.passport['зазор ламп до рёбер, мм'];
+        const need = Math.ceil((state.diam + 2 * (40 - gap)) / 50) * 50;           // зазор растёт ~ на полширины
+        const stop = gap < 0 ? `<span class="chip stop">Так не делаем: лампы A60 выходят за решётку на ${-gap} мм. ` +
+          `Нужна ширина примерно от ${need} мм или лампы меньше.</span>` : '';
+        $('warns').innerHTML = stop + (m.warn.length ? m.warn.map((x) => `<span class="chip">${x}</span>`).join('') : (stop ? '' : '<span class="chip ok">все проверки пройдены</span>'));
         $('stageSub').textContent = `${state.shape === 'oval' ? 'овал' : 'шар'} · ${state.pattern === 'drops' ? 'капли' : 'круглые ячейки'} · зерно ${state.seed}`;
       } else {
         $('warns').innerHTML = `<span class="chip">Не собралось: ${m.message}. Поменяйте ширину или число ламп.</span>`;
