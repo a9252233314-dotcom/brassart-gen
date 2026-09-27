@@ -52,7 +52,38 @@ export function build(P: any, wasm: any) {
   // профиль: "ellipse" — эллипс; "cushion" — «подушка»: плоский эллипс-сердцевина, обведённый кругом радиуса
   // rim_radius_ratio × полувысоты — край круглый (ячейки обнимают его спокойно, режется на панели), верх выпуклый
   let profTab: Float64Array | null = null;
+  // «Волна» (02): край овала идёт волной вверх-вниз; гребней, сдвиг и высота — от зерна.
+  // Таблица расстояний по азимуту и широте; к оси волна сходит на нет (площадка на полюсе ровная).
+  let waveTab: Float64Array | null = null;
+  const NAZ = 180, NLAT = 361;
+  const wr = rng(P.seed * 13 + 5);
+  const wave = {
+    n: (P.wave_counts ?? [3, 4, 5])[Math.floor(wr() * (P.wave_counts ?? [3, 4, 5]).length)],
+    ph: 2 * Math.PI * wr(), ph2: 2 * Math.PI * wr(),
+    amp: (P.wave_amp_ratio ?? 0.09) * P.diameter * (0.8 + 0.4 * wr()),
+  };
+  const buildWave = () => {
+    const tab = new Float64Array(NAZ * NLAT);
+    for (let ia = 0; ia < NAZ; ia++) {
+      const phi = (2 * Math.PI * ia) / NAZ;
+      const h = wave.amp * (Math.sin(wave.n * phi + wave.ph) + 0.3 * Math.sin(2 * wave.n * phi + wave.ph2));
+      const ang: number[] = [], dist: number[] = [];
+      for (let i = 0; i <= 1500; i++) {
+        const u = -Math.PI / 2 + (Math.PI * i) / 1500, r = Rx * Math.cos(u), q = r / Rx;
+        const z = Rz * Math.sin(u) + h * q * q;
+        ang.push(Math.atan2(z, r)); dist.push(Math.hypot(r, z));
+      }
+      for (let il = 0, j = 0; il < NLAT; il++) {
+        const a = -Math.PI / 2 + (Math.PI * il) / (NLAT - 1);
+        while (j < ang.length - 2 && ang[j + 1] < a) j++;
+        const tt = Math.max(0, Math.min(1, (a - ang[j]) / (ang[j + 1] - ang[j] || 1)));
+        tab[ia * NLAT + il] = dist[j] + (dist[j + 1] - dist[j]) * tt;
+      }
+    }
+    waveTab = tab;
+  };
   const buildProfile = () => {
+    if (shape === 'wave') { buildWave(); return; }
     if ((P.profile ?? 'ellipse') !== 'cushion') { profTab = null; return; }
     const rr = (P.rim_radius_ratio ?? 0.8) * Rz, a1 = Rx - rr, c1 = Math.max(1, Rz - rr);
     const NT = 721, tab = new Float64Array(NT), ang: number[] = [], dist: number[] = [];
@@ -71,6 +102,13 @@ export function build(P: any, wasm: any) {
     profTab = tab;
   };
   const baseRho = (w: V3) => {
+    if (waveTab) {
+      const fa = (((Math.atan2(w[1], w[0]) / (2 * Math.PI)) + 1) % 1) * NAZ, ia = Math.floor(fa) % NAZ, ta = fa - Math.floor(fa), ib = (ia + 1) % NAZ;
+      const fl = ((Math.asin(Math.max(-1, Math.min(1, w[2]))) + Math.PI / 2) / Math.PI) * (NLAT - 1);
+      const il = Math.min(NLAT - 2, Math.floor(fl)), tl = fl - il;
+      const v = (i: number, l: number) => waveTab![i * NLAT + l];
+      return (v(ia, il) * (1 - tl) + v(ia, il + 1) * tl) * (1 - ta) + (v(ib, il) * (1 - tl) + v(ib, il + 1) * tl) * ta;
+    }
     if (!profTab) return 1 / Math.sqrt((w[0] * w[0] + w[1] * w[1]) / (Rx * Rx) + (w[2] * w[2]) / (Rz * Rz));
     const f = ((Math.asin(Math.max(-1, Math.min(1, w[2]))) + Math.PI / 2) / Math.PI) * (profTab.length - 1);
     const i = Math.min(profTab.length - 2, Math.floor(f)), t = f - i;
@@ -224,7 +262,7 @@ export function build(P: any, wasm: any) {
   // где поверхность гнётся круто (край овала) — ячейка мельче: обнимает не больше rim_cell_turn_deg изгиба
   // (мастер 2026-09-27: «можно по мельче по краю»); где пологая — размер как у шара
   const turn = ((P.rim_cell_turn_deg ?? 45) * Math.PI) / 180;
-  const hAt = (k: number) => Math.min(cellLen, turn / Math.max(k, 1e-9));
+  const hAt = (k: number) => (P.rim_cell_turn_deg == null ? cellLen : Math.min(cellLen, turn / Math.max(k, 1e-9)));   // null — выключено
   const dens = samples.map((q) => (cellLen / hAt(q.k)) ** 4);  // плотность для выравнивания (размер ~ плотность^-1/4)
   const nCells = general ? Math.round(samples.reduce((a0, q) => a0 + q.wt / hAt(q.k) ** 2, 0) * ((4 * Math.PI) / NSS))
     : P.cells_auto ? Math.round(refCells * (P.diameter / P.cell_ref.diameter) ** 2) : P.cells;
@@ -391,7 +429,7 @@ export function build(P: any, wasm: any) {
   // плавный: в азимутальной равнопромежуточной на Rm — расстояния на сфере почти без искажений.
   if (P.rib_mid * (Rin / R) < P.min_section) warn.push(`ребро на внутренней стороне ${(P.rib_mid * Rin / R).toFixed(1)} мм < ${P.min_section}`);
   if (T < P.min_section) warn.push(`глубина ребра ${T} мм < ${P.min_section}`);
-  type Cell = { s: V3; e1: V3; e2: V3; core: V2[]; flat: Float64Array; fil: number; S?: V3; f1?: V3; f2?: V3 };
+  type Cell = { s: V3; e1: V3; e2: V3; core: V2[]; flat: Float64Array; fil: number; S?: V3; f1?: V3; f2?: V3; nc?: boolean };
   // другие формы: точка поверхности → касательная плоскость в центре ячейки, длина = хорда (≈ по поверхности)
   const planeG = (c: { S?: V3; f1?: V3; f2?: V3 }, Q: V3): V2 => {
     const d = sub(Q, c.S!), x = dot(d, c.f1!), y = dot(d, c.f2!), h = Math.hypot(x, y), L0 = len(d);
@@ -424,6 +462,25 @@ export function build(P: any, wasm: any) {
     for (const p of pts2) if (!poly.length || Math.hypot(p[0] - poly[poly.length - 1][0], p[1] - poly[poly.length - 1][1]) > 0.01) poly.push(p);
     while (poly.length > 1 && Math.hypot(poly[0][0] - poly[poly.length - 1][0], poly[0][1] - poly[poly.length - 1][1]) <= 0.01) poly.pop();
     if (poly.length < 3 || area2(poly) <= 0) { skipped++; return null; }
+    if (general) {
+      // изогнутая форма: контур ячейки на развёртке бывает вогнутым — отступ через CrossSection
+      // (работает с любым контуром; прежний отступ полуплоскостями годился только для выпуклых
+      // и на вогнутых съедал дыру — рёбра выходили 13–14.6 мм вместо 11)
+      const cs = new wasm.CrossSection([poly], 'Positive');
+      const alive = (d: number) => { const o = cs.offset(-d, 'Miter', 4); const a = o.area(); o.delete(); return a > 1e-3; };
+      let lo = 0, hi = 500;
+      for (let k = 0; k < 24; k++) { const mid = (lo + hi) / 2; if (alive(mid)) lo = mid; else hi = mid; }
+      const avail = lo - half;
+      if (avail < 3) { cs.delete(); skipped++; return null; }
+      const fil = P.hole_round_ratio * avail;
+      const co = cs.offset(-(half + fil), 'Miter', 4), polys: V2[][] = co.toPolygons() as any;
+      co.delete(); cs.delete();
+      let big: V2[] = [];
+      for (const pg of polys) if (Math.abs(area2(pg)) > Math.abs(area2(big.length > 2 ? big : [[0, 0], [0, 0], [0, 0]]))) big = pg;
+      if (big.length < 3) { skipped++; return null; }
+      if (area2(big) < 0) big = big.slice().reverse();
+      return { s, e1, e2, core: big, flat: Float64Array.from(big.flat()), fil, nc: true, ...cf };
+    }
     let fil: number;
     if (gnomonic) fil = P.hole_roundness;
     else {
@@ -442,17 +499,19 @@ export function build(P: any, wasm: any) {
     if (!c) return 1e3;
     const [qx, qy] = general ? planeG(c, surf([wx, wy, wz])) : plane(wx * c.e1[0] + wy * c.e1[1] + wz * c.e1[2], wx * c.e2[0] + wy * c.e2[1] + wz * c.e2[2], wx * c.s[0] + wy * c.s[1] + wz * c.s[2]);
     const k = c.flat, n = k.length / 2;
-    let dmin = Infinity, inside = true;
+    let dmin = Infinity, inside = true, cross = 0;
     for (let i = 0; i < n; i++) {
       const j = (i + 1) % n;
       const ax = k[2 * i], ay = k[2 * i + 1], ex = k[2 * j] - ax, ey = k[2 * j + 1] - ay;
       const px = qx - ax, py = qy - ay;
-      if (ex * py - ey * px < 0) inside = false;              // справа от ребра (обход против часовой) — снаружи
+      if (c.nc) { const by = ay + ey; if ((ay > qy) !== (by > qy) && qx < ax + (ex * (qy - ay)) / ey) cross ^= 1; }
+      else if (ex * py - ey * px < 0) inside = false;         // справа от ребра (обход против часовой) — снаружи
       let t = (px * ex + py * ey) / (ex * ex + ey * ey);
       t = t < 0 ? 0 : t > 1 ? 1 : t;
       const d = Math.hypot(px - ex * t, py - ey * t);
       if (d < dmin) dmin = d;
     }
+    if (c.nc) inside = cross === 1;
     return (inside ? -dmin : dmin) - c.fil;
   };
 
