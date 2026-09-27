@@ -23,8 +23,8 @@
 [hidden] { display: none !important; }
 html, body { height: 100%; }
 body { background: var(--ground); color: var(--ink); font-family: var(--ui); font-size: 14px; line-height: 1.45; padding-inline: 16px; padding-block: 16px; }
-.app { max-width: 1280px; margin: 0 auto; display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 16px; min-height: calc(100% - 0px); }
-.stage { position: relative; background: var(--stage); border-radius: 6px; min-height: 560px; overflow: hidden; }
+.app { max-width: 1280px; margin: 0 auto; display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 16px; align-items: start; }
+.stage { position: sticky; top: 16px; height: calc(100vh - 32px); min-height: 480px; background: var(--stage); border-radius: 6px; overflow: hidden; }
 .stage canvas { display: block; width: 100%; height: 100%; }
 .stage .tag { position: absolute; left: 16px; top: 14px; color: #e8dcc2; font-family: var(--display); font-size: 22px; letter-spacing: .08em; pointer-events: none; }
 .stage .sub { position: absolute; left: 16px; top: 44px; color: #9c917d; font-size: 12px; letter-spacing: .06em; text-transform: uppercase; pointer-events: none; }
@@ -59,7 +59,7 @@ input[type=range] { width: 100%; accent-color: var(--brass); }
 .note { color: var(--muted); font-size: 12px; margin: 0; }
 @media (max-width: 860px) {
   .app { grid-template-columns: 1fr; }
-  .stage { min-height: 420px; }
+  .stage { position: relative; top: 0; height: 60vh; min-height: 380px; }
 }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
 </style>
@@ -84,6 +84,7 @@ input[type=range] { width: 100%; accent-color: var(--brass); }
         <button id="shape-sphere" type="button" aria-pressed="true">Шар</button>
         <button id="shape-oval" type="button" aria-pressed="false">Овал</button>
         <button id="shape-wave" type="button" aria-pressed="false">Волна</button>
+        <button id="shape-double" type="button" aria-pressed="false">Двойной</button>
       </div>
     </div>
 
@@ -97,8 +98,20 @@ input[type=range] { width: 100%; accent-color: var(--brass); }
     </div>
 
     <div class="group">
-      <label for="diam">Ширина <output id="diamOut">600 мм</output></label>
+      <label for="diam"><span id="diamLbl">Ширина</span> <output id="diamOut">600 мм</output></label>
       <input id="diam" type="range" min="450" max="850" step="50" value="600">
+    </div>
+
+    <div class="group" id="dblBox" hidden>
+      <label for="diamLow">Нижний шар <output id="diamLowOut">450 мм</output></label>
+      <input id="diamLow" type="range" min="400" max="700" step="50" value="450">
+      <label for="gapBalls">Между шарами <output id="gapOut">150 мм</output></label>
+      <input id="gapBalls" type="range" min="80" max="600" step="10" value="150">
+    </div>
+
+    <div class="group">
+      <label for="rod">Подвес <output id="rodOut">0.8 м</output></label>
+      <input id="rod" type="range" min="300" max="3000" step="100" value="800">
     </div>
 
     <div class="group">
@@ -140,7 +153,7 @@ window.__PARAMS__ = /*__PARAMS__*/;
   const $ = (id) => document.getElementById(id);
   const busy = $('busy'), busyText = $('busyText');
   if (!window.THREE || !THREE.OrbitControls) { busyText.textContent = '3D не запустилось в этом браузере — обновите браузер.'; return; }
-  const state = { shape: 'sphere', pattern: 'round', diam: 600, lamps: 5, dir: 'down', seed: 1 };
+  const state = { shape: 'sphere', pattern: 'round', diam: 600, diamLow: 450, gap: 150, rod: 800, lamps: 5, dir: 'down', seed: 1 };
 
   // ── 3D ──
   const stage = $('stage');
@@ -174,16 +187,19 @@ window.__PARAMS__ = /*__PARAMS__*/;
   const WORKER_MAIN = `
 self.onmessage = async (e) => {
   try {
-    const { P, wasm: bin } = e.data;
+    const { jobs, wasm: bin } = e.data;
     const wasm = await self.ManifoldModule({ wasmBinary: bin, locateFile: (p) => p });   // wasm уже передан — адрес не нужен
     wasm.setup();
-    const t = performance.now();
-    const r = self.CELL.build(P, wasm);
-    const m = r.body.getMesh(), np = m.numProp, vp = m.vertProperties;
-    const pos = new Float32Array((vp.length / np) * 3);
-    for (let i = 0, j = 0; i < vp.length; i += np, j += 3) { pos[j] = vp[i]; pos[j + 1] = vp[i + 1]; pos[j + 2] = vp[i + 2]; }
-    const idx = new Uint32Array(m.triVerts);
-    self.postMessage({ type: 'done', pos, idx, passport: r.passport, warn: r.warn, lamp: r.L, armDeg: r.armDeg, ms: performance.now() - t }, [pos.buffer, idx.buffer]);
+    const t = performance.now(), out = [], tr = [];
+    for (const P of jobs) {                                   // «Двойной» — две сборки подряд
+      const r = self.CELL.build(P, wasm);
+      const m = r.body.getMesh(), np = m.numProp, vp = m.vertProperties;
+      const pos = new Float32Array((vp.length / np) * 3);
+      for (let i = 0, j = 0; i < vp.length; i += np, j += 3) { pos[j] = vp[i]; pos[j + 1] = vp[i + 1]; pos[j + 2] = vp[i + 2]; }
+      const idx = new Uint32Array(m.triVerts);
+      out.push({ pos, idx, passport: r.passport, warn: r.warn, lamp: r.L, armDeg: r.armDeg }); tr.push(pos.buffer, idx.buffer);
+    }
+    self.postMessage({ type: 'done', res: out, ms: performance.now() - t }, tr);
   } catch (err) {
     self.postMessage({ type: 'error', message: String((err && err.message) || err) });
   }
@@ -202,14 +218,21 @@ self.onmessage = async (e) => {
   };
 
   function paramsNow() {
-    const P = JSON.parse(JSON.stringify(window.__PARAMS__));
-    P.shape = state.shape; P.pattern = state.pattern; P.diameter = state.diam; P.seed = state.seed;
-    P.mesh_step = 5; P.shape_samples = 8000; P.stretch_samples = 8000;
-    P.panels = { ...P.panels, enabled: false };
+    const base = JSON.parse(JSON.stringify(window.__PARAMS__));
+    base.pattern = state.pattern; base.seed = state.seed;
+    base.mesh_step = 5; base.shape_samples = 8000; base.stretch_samples = 8000;
+    base.panels = { ...base.panels, enabled: false };
     const tiers = tiersFor(state.lamps, state.dir);
-    P.lamps = { ...P.lamps, count: state.lamps, direction: state.dir, ring_radius: state.lamps > 5 ? 80 : 30 };
-    if (tiers.length > 1) P.lamps.tiers = tiers; else delete P.lamps.tiers;
-    return { P, tiers };
+    base.lamps = { ...base.lamps, count: state.lamps, direction: state.dir, ring_radius: state.lamps > 5 ? 80 : 30 };
+    if (tiers.length > 1) base.lamps.tiers = tiers; else delete base.lamps.tiers;
+    if (state.shape !== 'double') return [{ P: { ...base, shape: state.shape, diameter: state.diam }, tiers, zOff: 0, name: '' }];
+    // «Двойной»: верхний — с площадкой и снизу (труба насквозь), нижний — своё зерно, висит ниже на зазор
+    const up = { ...base, shape: 'sphere', diameter: state.diam, bottom_seat: true };
+    const lo = { ...base, shape: 'sphere', diameter: state.diamLow, seed: state.seed + 1000 };
+    const upTiers = tiersFor(Math.max(state.lamps, 2), state.dir);    // в верхнем одна лампа по центру невозможна
+    if (state.lamps === 1) { up.lamps = { ...up.lamps, count: 2 }; }
+    return [{ P: up, tiers: upTiers, zOff: 0, name: 'верхний' },
+            { P: lo, tiers, zOff: -(state.diam / 2 + state.gap + state.diamLow / 2), name: 'нижний' }];
   }
 
   function lampMeshes(L, tiers, armDeg) {
@@ -249,50 +272,83 @@ self.onmessage = async (e) => {
     return g;
   }
 
-  function show(m, P, tiers) {
+  function show(res, jobs) {
     if (group) { scene.remove(group); group.traverse((o) => o.geometry && o.geometry.dispose()); }
     group = new THREE.Group();
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.BufferAttribute(m.pos, 3));
-    geo.setIndex(new THREE.BufferAttribute(m.idx, 1));
-    geo.computeVertexNormals();
-    geo.computeBoundingBox();
-    group.add(new THREE.Mesh(geo, brass));
-    const top = geo.boundingBox.max.z;
-    const lampsG = lampMeshes(m.lamp, tiers, m.armDeg); lampsG.visible = m.passport['зазор ламп до рёбер, мм'] >= 0; group.add(lampsG);
-    // центральная труба: от кольца в центре до полюса (M10 или M12 — из паспорта)
-    const tubeR = /M12/.test(m.passport['труба центрального узла'] || '') ? 6 : 5;
-    const L0 = m.lamp, z0 = L0.single ? L0.bulb_length / 2 + L0.socket_length + (L0.adapter_length || 30) : 0;   // низ трубы
-    const pipe = new THREE.Mesh(new THREE.CylinderGeometry(tubeR, tubeR, top - z0, 16), brass);
-    pipe.rotation.x = Math.PI / 2; pipe.position.z = (top + z0) / 2; group.add(pipe);
-    const rodLen = 520;
+    let zTop = -Infinity, zBot = Infinity, Rmax = 0;
+    const boxes = [];
+    res.forEach((m, k) => {
+      const job = jobs[k];
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(m.pos, 3));
+      geo.setIndex(new THREE.BufferAttribute(m.idx, 1));
+      geo.translate(0, 0, job.zOff);
+      geo.computeVertexNormals(); geo.computeBoundingBox();
+      const bb = geo.boundingBox; boxes.push(bb);
+      group.add(new THREE.Mesh(geo, brass));
+      zTop = Math.max(zTop, bb.max.z); zBot = Math.min(zBot, bb.min.z); Rmax = Math.max(Rmax, bb.max.x, bb.max.y);
+      const lampsG = lampMeshes(m.lamp, job.tiers, m.armDeg);
+      lampsG.position.z = job.zOff; lampsG.visible = m.passport['зазор ламп до рёбер, мм'] >= 0; group.add(lampsG);
+      // центральная труба: у верхнего «Двойного» — насквозь; иначе от кольца (или переходника) до полюса
+      const tubeR = /M12/.test(m.passport['труба центрального узла'] || '') || res.length > 1 ? 6 : 5;
+      const L0 = m.lamp, z0 = job.P.bottom_seat ? bb.min.z : job.zOff + (L0.single ? L0.bulb_length / 2 + L0.socket_length + (L0.adapter_length || 30) : 0);
+      const pipe = new THREE.Mesh(new THREE.CylinderGeometry(tubeR, tubeR, bb.max.z - z0, 16), brass);
+      pipe.rotation.x = Math.PI / 2; pipe.position.z = (bb.max.z + z0) / 2; group.add(pipe);
+    });
+    if (boxes.length === 2) {                                 // декоративная трубка Ø26 между шарами
+      const a = boxes[0].min.z, b = boxes[1].max.z;
+      const sl = new THREE.Mesh(new THREE.CylinderGeometry(13, 13, a - b, 32), brass);
+      sl.rotation.x = Math.PI / 2; sl.position.z = (a + b) / 2; group.add(sl);
+    }
+    const rodLen = state.rod;
     const rod = new THREE.Mesh(new THREE.CylinderGeometry(6, 6, rodLen, 16), brass);
-    rod.rotation.x = Math.PI / 2; rod.position.z = top + rodLen / 2; group.add(rod);
+    rod.rotation.x = Math.PI / 2; rod.position.z = zTop + rodLen / 2; group.add(rod);
     const cup = new THREE.Mesh(new THREE.CylinderGeometry(55, 38, 30, 40), brass);
-    cup.rotation.x = Math.PI / 2; cup.position.z = top + rodLen + 15; group.add(cup);
+    cup.rotation.x = Math.PI / 2; cup.position.z = zTop + rodLen + 15; group.add(cup);
     group.scale.setScalar(0.001);
     group.rotation.x = -Math.PI / 2;                          // Z генератора — вверх
     scene.add(group);
-    const R = Math.max(geo.boundingBox.max.x, geo.boundingBox.max.y) / 1000, H = (geo.boundingBox.max.z - geo.boundingBox.min.z) / 1000;
-    // вся люстра в кадре: расстояние по охватывающему радиусу и углу обзора камеры
-    const fit = Math.max(R, H * 0.75) * 1.3 / Math.sin((camera.fov * Math.PI) / 360) / Math.min(1, camera.aspect);
-    controls.target.set(0, H * 0.12, 0);
-    camera.position.set(0.62 * fit, H * 0.12 + 0.3 * fit, 0.73 * fit);
+    // в кадре — сама люстра (штанга уходит вверх)
+    const R = Rmax / 1000, H = (zTop - zBot) / 1000, zc = (zTop + zBot) / 2000;
+    const fit = Math.max(R, H * 0.62) * 1.3 / Math.sin((camera.fov * Math.PI) / 360) / Math.min(1, camera.aspect);
+    controls.target.set(0, zc + H * 0.08, 0);
+    camera.position.set(0.62 * fit, zc + H * 0.08 + 0.3 * fit, 0.73 * fit);
   }
 
-  function passportView(p, ms) {
-    const rows = [
-      ['Каркас, латунь', `${p['масса каркаса, кг'].toFixed(1)} кг`, true],
-      ['В сборе (оснащение условно)', `${p['масса в сборе, кг (оснащение условно)'].toFixed(1)} кг`],
-      ['Габарит', typeof p['габарит по факту, мм'] === 'number' ? `Ø${p['габарит по факту, мм']} мм` : p['габарит по факту, мм'] + ' мм'],
-      ['Ячеек', p['ячеек']],
-      ['Труба узла', p['труба центрального узла']],
-      ['Крепление', p['крепление']],
-      ['Лампы', p['лампы'].replace(/^\d+ шт\.: /, '')],
-      ['До ламп от решётки', `${p['зазор ламп до рёбер, мм']} мм`],
-      ['Центр тяжести от оси', `${p['центр тяжести от оси, мм']} мм`],
-      ['Собрано за', `${(ms / 1000).toFixed(1)} с`],
-    ];
+  function passportView(res, jobs, ms) {
+    const p = res.map((m) => m.passport);
+    const kg = (x) => `${x.toFixed(1)} кг`, lamps = (q) => q['лампы'].replace(/^\d+ шт\.: /, '');
+    let rows;
+    if (p.length === 1) {
+      const q = p[0];
+      rows = [
+        ['Каркас, латунь', kg(q['масса каркаса, кг']), true],
+        ['В сборе (оснащение условно)', kg(q['масса в сборе, кг (оснащение условно)'])],
+        ['Габарит', typeof q['габарит по факту, мм'] === 'number' ? `Ø${q['габарит по факту, мм']} мм` : q['габарит по факту, мм'] + ' мм'],
+        ['Ячеек', q['ячеек']],
+        ['Труба узла', q['труба центрального узла']],
+        ['Крепление', q['крепление']],
+        ['Лампы', lamps(q)],
+        ['До ламп от решётки', `${q['зазор ламп до рёбер, мм']} мм`],
+        ['Центр тяжести от оси', `${q['центр тяжести от оси, мм']} мм`],
+      ];
+    } else {
+      const frame = p[0]['масса каркаса, кг'] + p[1]['масса каркаса, кг'];
+      const total = p[0]['масса в сборе, кг (оснащение условно)'] + p[1]['масса в сборе, кг (оснащение условно)'];
+      rows = [
+        ['Каркасы, латунь', kg(frame), true],
+        ['В сборе (оснащение условно)', kg(total)],
+        ['Верхний шар', `Ø${state.diam} · ${p[0]['ячеек']} яч. · ${kg(p[0]['масса каркаса, кг'])}`],
+        ['Нижний шар', `Ø${state.diamLow} · ${p[1]['ячеек']} яч. · ${kg(p[1]['масса каркаса, кг'])}`],
+        ['Между шарами', `${state.gap} мм, трубка Ø26`],
+        ['Труба', 'M12 сквозь оба, муфта M12×1'],
+        ['Крепление', total > 15 ? 'усиленное (> 15 кг)' : 'обычное'],
+        ['Лампы верхнего', lamps(p[0])],
+        ['Лампы нижнего', lamps(p[1])],
+        ['До ламп от решётки', `${Math.min(p[0]['зазор ламп до рёбер, мм'], p[1]['зазор ламп до рёбер, мм'])} мм`],
+      ];
+    }
+    rows.push(['Подвес', `${(state.rod / 1000).toFixed(1)} м`], ['Собрано за', `${(ms / 1000).toFixed(1)} с`]);
     $('passport').innerHTML = rows.map(([k, v, big]) => `<dt>${k}</dt><dd${big ? ' class="big"' : ''}>${v}</dd>`).join('');
   }
 
@@ -300,9 +356,9 @@ self.onmessage = async (e) => {
   function run() {
     if (worker) { worker.terminate(); worker = null; }     // новая ручка — старая сборка отменяется сразу
     const id = ++jobId;
-    const { P, tiers } = paramsNow();
-    const SH = { sphere: 'шар', oval: 'овал', wave: 'волна' }, PT = { round: 'круглые ячейки', drops: 'капли', bands: 'ленты' };
-    const label = `Генерирую · ${SH[state.shape]} Ø${state.diam}, зерно ${state.seed}`;
+    const jobs = paramsNow();
+    const SH = { sphere: 'шар', oval: 'овал', wave: 'волна', double: 'двойной' }, PT = { round: 'круглые ячейки', drops: 'капли', bands: 'ленты' };
+    const label = `Генерирую · ${SH[state.shape]} Ø${state.diam}${state.shape === 'double' ? ' + Ø' + state.diamLow : ''}, зерно ${state.seed}`;
     const t0 = performance.now();
     busy.hidden = false; busyText.textContent = label + '…';
     clearInterval(tick);
@@ -318,13 +374,14 @@ self.onmessage = async (e) => {
       if (id !== jobId) return;
       const m = e.data; done();
       if (m.type === 'done') {
-        show(m, P, tiers);
-        passportView(m.passport, m.ms);
-        const gap = m.passport['зазор ламп до рёбер, мм'];
+        show(m.res, jobs);
+        passportView(m.res, jobs, m.ms);
+        const gap = Math.min(...m.res.map((r) => r.passport['зазор ламп до рёбер, мм']));
         const need = Math.ceil((state.diam + 2 * (40 - gap)) / 50) * 50;           // зазор растёт ~ на полширины
         const stop = gap < 0 ? `<span class="chip stop">Так не делаем: лампы выходят за решётку на ${-gap} мм даже на E14 с коротким рожком. ` +
           `Нужна ширина примерно от ${need} мм или меньше ламп.</span>` : '';
-        $('warns').innerHTML = stop + (m.warn.length ? m.warn.map((x) => `<span class="chip">${x}</span>`).join('') : (stop ? '' : '<span class="chip ok">все проверки пройдены</span>'));
+        const warns = m.res.flatMap((r, k) => r.warn.map((x) => (jobs[k].name ? jobs[k].name + ': ' : '') + x));
+        $('warns').innerHTML = stop + (warns.length ? warns.map((x) => `<span class="chip">${x}</span>`).join('') : (stop ? '' : '<span class="chip ok">все проверки пройдены</span>'));
         $('stageSub').textContent = `${SH[state.shape]} · ${PT[state.pattern]} · зерно ${state.seed}`;
       } else {
         $('warns').innerHTML = `<span class="chip">Не собралось: ${m.message}. Поменяйте ширину или число ламп.</span>`;
@@ -334,16 +391,19 @@ self.onmessage = async (e) => {
       if (id !== jobId) return;
       done(); $('warns').innerHTML = `<span class="chip">Генератор остановился: ${e.message || 'ошибка в фоновом процессе'}.</span>`;
     };
-    worker.postMessage({ P, wasm: wasmBytes });
+    worker.postMessage({ jobs: jobs.map((j) => j.P), wasm: wasmBytes });
   }
 
   const pressed = (ids, on) => ids.forEach((i) => $(i).setAttribute('aria-pressed', String(i === on)));
   let timer = 0;
   const later = () => { clearTimeout(timer); timer = setTimeout(run, 300); };
   const setShape = (s) => {
-    state.shape = s; pressed(['shape-sphere', 'shape-oval', 'shape-wave'], 'shape-' + s);
+    state.shape = s; pressed(['shape-sphere', 'shape-oval', 'shape-wave', 'shape-double'], 'shape-' + s);
     const d = $('diam');
-    if (s === 'wave') { d.min = 600; d.max = 900; if (state.diam < 600 || state.diam > 900) state.diam = 700; }
+    $('dblBox').hidden = s !== 'double';
+    $('diamLbl').textContent = s === 'double' ? 'Верхний шар' : 'Ширина';
+    if (s === 'double') { d.min = 400; d.max = 800; if (state.diam < 400 || state.diam > 800) state.diam = 550; }
+    else if (s === 'wave') { d.min = 600; d.max = 900; if (state.diam < 600 || state.diam > 900) state.diam = 700; }
     else if (s === 'oval') { d.min = 700; d.max = 1000; if (state.diam < 700) state.diam = 850; }
     else { d.min = 450; d.max = 850; if (state.diam > 850) state.diam = 600; }
     d.value = state.diam; $('diamOut').textContent = state.diam + ' мм'; later();
@@ -351,6 +411,13 @@ self.onmessage = async (e) => {
   $('shape-sphere').onclick = () => setShape('sphere');
   $('shape-oval').onclick = () => setShape('oval');
   $('shape-wave').onclick = () => setShape('wave');
+  $('shape-double').onclick = () => setShape('double');
+  $('diamLow').oninput = (e) => { state.diamLow = +e.target.value; $('diamLowOut').textContent = state.diamLow + ' мм'; };
+  $('diamLow').onchange = later;
+  $('gapBalls').oninput = (e) => { state.gap = +e.target.value; $('gapOut').textContent = state.gap + ' мм'; };
+  $('gapBalls').onchange = later;
+  $('rod').oninput = (e) => { state.rod = +e.target.value; $('rodOut').textContent = (state.rod / 1000).toFixed(1) + ' м'; };
+  $('rod').onchange = later;
   const pats = ['pat-round', 'pat-drops', 'pat-bands'];
   $('pat-round').onclick = () => { state.pattern = 'round'; pressed(pats, 'pat-round'); later(); };
   $('pat-drops').onclick = () => { state.pattern = 'drops'; pressed(pats, 'pat-drops'); later(); };
