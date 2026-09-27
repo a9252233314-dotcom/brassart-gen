@@ -254,9 +254,11 @@ export function build(P: any, wasm: any) {
   // число ячеек от диаметра: ячейка того же размера, что у одобренного шара (cell_ref) — рисунок одинаковый
   // (для других форм — по площади оболочки: ячейка того же размера в мм)
   // узор: "round" — круглые ячейки (одобренный шар), "drops" — вытянутые по меридиану «капли» (мастер 2026-09-27)
-  const drops = P.pattern === 'drops';
-  const stretch = drops ? P.drops.stretch : P.cell_stretch ?? 1;
-  const refCells = drops ? P.drops.cell_ref_cells : P.cell_ref.cells;
+  // узоры: круглые · «капли» (вытянуты по меридиану) · «ленты» (вытянуты по кругу — для «Волны», лист 02)
+  const drops = P.pattern === 'drops', bands = P.pattern === 'bands';
+  const PAT = drops ? P.drops : bands ? P.bands : null;
+  const stretch = PAT ? PAT.stretch : P.cell_stretch ?? 1;
+  const refCells = PAT ? PAT.cell_ref_cells : P.cell_ref.cells;
   const refRm = P.cell_ref.diameter / 2 - T / 2, cellLen = refRm * Math.sqrt((4 * Math.PI) / refCells);
   const area = general ? samples.reduce((a0, q) => a0 + q.wt, 0) * ((4 * Math.PI) / NSS) : 0;
   // где поверхность гнётся круто (край овала) — ячейка мельче: обнимает не больше rim_cell_turn_deg изгиба
@@ -325,7 +327,7 @@ export function build(P: any, wasm: any) {
   // «капли»: старт — пояса по широте, вдоль оси шаг в stretch раз больше, чем поперёк (от круглой раскладки
   // выравнивание само не перестроится — застревает рядом с ней). Шаг подбирается под число ячеек.
   // Ось: cell_stretch_deg 0 — по меридиану, 90 — по параллели. У полюсов ячейки сходятся клиньями.
-  const psi = ((P.cell_stretch_deg ?? 0) * Math.PI) / 180;
+  const psi = ((bands ? 90 : P.cell_stretch_deg ?? 0) * Math.PI) / 180;
   if (stretch !== 1) {
     const along = Math.abs(Math.cos(psi)) >= Math.abs(Math.sin(psi));      // ось ближе к меридиану
     const rows = (sp: number) => {
@@ -357,7 +359,7 @@ export function build(P: any, wasm: any) {
       const ax = add(mul(a, Math.cos(psi)), mul(b0, Math.sin(psi)));
       return { a: ax, b: cross(q.n, ax) };
     });
-    const iters = stretch !== 1 ? P.drops?.relax_iterations ?? 12 : P.relax_iterations_shape ?? 15;
+    const iters = stretch !== 1 ? PAT?.relax_iterations ?? 12 : P.relax_iterations_shape ?? 15;
     for (let it = 0; it < iters; it++) {
       const SP = seeds.map(surf);
       const sum = seeds.map(() => [0, 0, 0] as V3), cnt = new Int32Array(seeds.length);
@@ -401,7 +403,7 @@ export function build(P: any, wasm: any) {
       const ax = add(mul(nrth, Math.cos(psi)), mul(east, Math.sin(psi))), bx = cross(x, ax);
       smp.push(...x, ...ax, ...bx, stretch);
     }
-    for (let it = 0; it < (drops ? P.drops.relax_iterations : P.relax_iterations_stretch); it++) {
+    for (let it = 0; it < (PAT ? PAT.relax_iterations : P.relax_iterations_stretch); it++) {
       const sum = seeds.map(() => [0, 0, 0] as V3), cnt = new Int32Array(seeds.length);
       for (let o = 0; o < smp.length; o += 10) {
         let best = 0, bd = Infinity;
@@ -472,7 +474,7 @@ export function build(P: any, wasm: any) {
       for (let k = 0; k < 24; k++) { const mid = (lo + hi) / 2; if (alive(mid)) lo = mid; else hi = mid; }
       const avail = lo - half;
       if (avail < 3) { cs.delete(); skipped++; return null; }
-      const fil = P.hole_round_ratio * avail;
+      const fil = Math.min(P.hole_round_ratio * avail, P.hole_fillet_max_mm ?? Infinity);   // потолок скругления — худее перепонки (мастер: «без болванок»)
       const co = cs.offset(-(half + fil), 'Miter', 4), polys: V2[][] = co.toPolygons() as any;
       co.delete(); cs.delete();
       let big: V2[] = [];
@@ -486,7 +488,7 @@ export function build(P: any, wasm: any) {
     else {
       const avail = inradius(poly) - half;
       if (avail < 3) { skipped++; return null; }
-      fil = P.hole_round_ratio * avail;
+      fil = P.hole_round_ratio * avail;                         // шар — одобренный, без потолка
     }
     const core = inset(poly, half + fil);
     if (core.length < 3 || Math.abs(area2(core)) < 1) { skipped++; return null; }
@@ -675,7 +677,7 @@ export function build(P: any, wasm: any) {
     ? `1 шт.: по центру на оси, без кольца, патрон на трубе через переходник, ${L.socket_name}/${L.bulb_name}`
     : `${lampCount} шт.: ` + tierInfo.map((t) => `${t.count} ${dirRu[t.direction] ?? t.direction}`).join(', ') + `, ${L.socket_name}/${L.bulb_name}, рожок ${L.arm_length} мм, кольцо Ø${2 * L.ring_radius}, гиб рожков ${armDeg}°`;
 
-  const tag = `cell-${style}-${P.shape}${drops ? '-drops' : ''}-${P.diameter}-seed${P.seed}`;
+  const tag = `cell-${style}-${P.shape}${drops ? '-drops' : bands ? '-bands' : ''}-${P.diameter}-seed${P.seed}`;
   // для нарезки на панели (цех): узлы и рёбра решётки + функции формы
   const panelCtx = () => {
     // узлы решётки = вершины Вороного (совпадающие у полюса — склеить), рёбра — между соседними треугольниками
@@ -704,7 +706,7 @@ export function build(P: any, wasm: any) {
       general, surf: general ? surf : undefined, nrm: general ? normalAt : undefined, area };
   };
   const passport = {
-    изделие: tag, семейство: P.family, вид: style === 'facet' ? 'гранёный' : 'плавный', узор: drops ? '«капли» (вытянутые)' : 'круглые ячейки', зерно: P.seed, форма: P.shape,
+    изделие: tag, семейство: P.family, вид: style === 'facet' ? 'гранёный' : 'плавный', узор: drops ? '«капли» (вытянутые)' : bands ? '«ленты» (вытянуты по кругу)' : 'круглые ячейки', зерно: P.seed, форма: P.shape,
     'диаметр, мм': P.diameter, 'габарит по факту, мм': general ? `Ø${Math.round(2 * maxXY)} × высота ${Math.round(zHi - zLo)}` : Math.round(2 * outerR), ячеек: seeds.length,
     'центр тяжести от оси, мм': +com.toFixed(1),
     'ребро, мм': style === 'facet'

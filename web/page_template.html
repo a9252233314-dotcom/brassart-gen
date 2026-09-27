@@ -75,7 +75,7 @@ input[type=range] { width: 100%; accent-color: var(--brass); }
   <aside class="panel">
     <div>
       <h1>Семейство CELL</h1>
-      <p class="lede">Литая латунная решётка. Каждое зерно — свой экземпляр: узор, а у овала и форма, рождаются заново.</p>
+      <p class="lede">Литая латунная решётка. Каждое зерно — свой экземпляр: узор, а у овала и волны и форма, рождаются заново.</p>
     </div>
 
     <div class="group">
@@ -83,6 +83,7 @@ input[type=range] { width: 100%; accent-color: var(--brass); }
       <div class="seg" role="group" aria-label="Форма">
         <button id="shape-sphere" type="button" aria-pressed="true">Шар</button>
         <button id="shape-oval" type="button" aria-pressed="false">Овал</button>
+        <button id="shape-wave" type="button" aria-pressed="false">Волна</button>
       </div>
     </div>
 
@@ -91,6 +92,7 @@ input[type=range] { width: 100%; accent-color: var(--brass); }
       <div class="seg" role="group" aria-label="Узор">
         <button id="pat-round" type="button" aria-pressed="true">Круглые ячейки</button>
         <button id="pat-drops" type="button" aria-pressed="false">Капли</button>
+        <button id="pat-bands" type="button" aria-pressed="false">Ленты</button>
       </div>
     </div>
 
@@ -299,7 +301,8 @@ self.onmessage = async (e) => {
     if (worker) { worker.terminate(); worker = null; }     // новая ручка — старая сборка отменяется сразу
     const id = ++jobId;
     const { P, tiers } = paramsNow();
-    const label = `Генерирую · ${state.shape === 'oval' ? 'овал' : 'шар'} Ø${state.diam}, зерно ${state.seed}`;
+    const SH = { sphere: 'шар', oval: 'овал', wave: 'волна' }, PT = { round: 'круглые ячейки', drops: 'капли', bands: 'ленты' };
+    const label = `Генерирую · ${SH[state.shape]} Ø${state.diam}, зерно ${state.seed}`;
     const t0 = performance.now();
     busy.hidden = false; busyText.textContent = label + '…';
     clearInterval(tick);
@@ -322,7 +325,7 @@ self.onmessage = async (e) => {
         const stop = gap < 0 ? `<span class="chip stop">Так не делаем: лампы выходят за решётку на ${-gap} мм даже на E14 с коротким рожком. ` +
           `Нужна ширина примерно от ${need} мм или меньше ламп.</span>` : '';
         $('warns').innerHTML = stop + (m.warn.length ? m.warn.map((x) => `<span class="chip">${x}</span>`).join('') : (stop ? '' : '<span class="chip ok">все проверки пройдены</span>'));
-        $('stageSub').textContent = `${state.shape === 'oval' ? 'овал' : 'шар'} · ${state.pattern === 'drops' ? 'капли' : 'круглые ячейки'} · зерно ${state.seed}`;
+        $('stageSub').textContent = `${SH[state.shape]} · ${PT[state.pattern]} · зерно ${state.seed}`;
       } else {
         $('warns').innerHTML = `<span class="chip">Не собралось: ${m.message}. Поменяйте ширину или число ламп.</span>`;
       }
@@ -338,16 +341,20 @@ self.onmessage = async (e) => {
   let timer = 0;
   const later = () => { clearTimeout(timer); timer = setTimeout(run, 300); };
   const setShape = (s) => {
-    state.shape = s; pressed(['shape-sphere', 'shape-oval'], 'shape-' + s);
+    state.shape = s; pressed(['shape-sphere', 'shape-oval', 'shape-wave'], 'shape-' + s);
     const d = $('diam');
-    if (s === 'oval') { d.min = 700; d.max = 1000; if (state.diam < 700) state.diam = 850; }
+    if (s === 'wave') { d.min = 600; d.max = 900; if (state.diam < 600 || state.diam > 900) state.diam = 700; }
+    else if (s === 'oval') { d.min = 700; d.max = 1000; if (state.diam < 700) state.diam = 850; }
     else { d.min = 450; d.max = 850; if (state.diam > 850) state.diam = 600; }
     d.value = state.diam; $('diamOut').textContent = state.diam + ' мм'; later();
   };
   $('shape-sphere').onclick = () => setShape('sphere');
   $('shape-oval').onclick = () => setShape('oval');
-  $('pat-round').onclick = () => { state.pattern = 'round'; pressed(['pat-round', 'pat-drops'], 'pat-round'); later(); };
-  $('pat-drops').onclick = () => { state.pattern = 'drops'; pressed(['pat-round', 'pat-drops'], 'pat-drops'); later(); };
+  $('shape-wave').onclick = () => setShape('wave');
+  const pats = ['pat-round', 'pat-drops', 'pat-bands'];
+  $('pat-round').onclick = () => { state.pattern = 'round'; pressed(pats, 'pat-round'); later(); };
+  $('pat-drops').onclick = () => { state.pattern = 'drops'; pressed(pats, 'pat-drops'); later(); };
+  $('pat-bands').onclick = () => { state.pattern = 'bands'; pressed(pats, 'pat-bands'); later(); };
   $('diam').oninput = (e) => { state.diam = +e.target.value; $('diamOut').textContent = state.diam + ' мм'; };
   $('diam').onchange = later;
   $('lamps').oninput = (e) => { state.lamps = +e.target.value; $('lampsOut').textContent = state.lamps; };
