@@ -126,7 +126,8 @@ self.onmessage = async (e) => {
   function paramsNow() {
     const P = JSON.parse(JSON.stringify(window.__PARAMS__));
     P.diameter = state.diam; P.seed = state.seed;
-    Object.assign(P.petal, { step_s: 4, profile_pts: 24, rim_pts: 5 });   // превью: сетка грубее
+    const phone = matchMedia('(max-width: 860px)').matches || (navigator.deviceMemory || 8) <= 4;
+    Object.assign(P.petal, phone ? { step_s: 6, profile_pts: 18, rim_pts: 4 } : { step_s: 4, profile_pts: 24, rim_pts: 5 });   // превью: сетка грубее, на телефоне — ещё
     return P;
   }
 

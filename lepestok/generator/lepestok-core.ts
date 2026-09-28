@@ -259,7 +259,10 @@ export function build(P: any, wasm: any, opt: { checks?: boolean } = {}) {
       return dr * nL[0] + dz * nL[1] > 0 && Math.abs(dr * uL[0] + dz * uL[1]) < 70;
     };
     const place = (m: any) => m.rotate([0, 90 - phL / D2R, 0]);
-    man = man.subtract(place(Manifold.cube([140, 400, 200]).translate([-70, -200, 0])).translate([E[0], 0, E[1]]).rotate([0, 0, pt.phi / D2R]));
+    { // память: промежуточные детали освобождаем сразу (на телефоне её мало)
+      const box = place(Manifold.cube([140, 400, 200]).translate([-70, -200, 0])).translate([E[0], 0, E[1]]).rotate([0, 0, pt.phi / D2R]);
+      const cut = man.subtract(box); box.delete(); man.delete(); man = cut;
+    }
 
     // съём из двусторонней формы: направление d в радиальной плоскости, подбирается на наибольший наименьший уклон
     const fn: { n: V3; tg: number; s: number }[] = [];
@@ -349,12 +352,15 @@ export function build(P: any, wasm: any, opt: { checks?: boolean } = {}) {
   let petals: ReturnType<typeof buildPetal>[] = [];
   for (let pass = 0; pass < 4; pass++) {
     warn.length = 0;
+    for (const pt of petals) pt.man.delete();                        // прошлый проход больше не нужен
     petals = pets.map((_, i) => buildPetal(i, rhoE, false));
-    const ext = extentOf(petals.flatMap((pt) => { const l = lampParts(pt); return [pt.man, l.plate, l.bulb]; }));
+    const tmp = petals.map(lampParts);
+    const ext = extentOf([...petals.map((pt) => pt.man), ...tmp.flatMap((l) => [l.plate, l.bulb])]);
+    for (const l of tmp) { l.plate.delete(); l.socket.delete(); l.bulb.delete(); }
     if (Math.abs(ext - P.diameter / 2) < 0.3) break;
     rhoE += P.diameter / 2 - ext;
   }
-  if (opt.checks !== false) { warn.length = 0; petals = pets.map((_, i) => buildPetal(i, rhoE, true)); }   // съём — один раз, в конце
+  if (opt.checks !== false) { warn.length = 0; for (const pt of petals) pt.man.delete(); petals = pets.map((_, i) => buildPetal(i, rhoE, true)); }   // съём — один раз, в конце
   const lamps = petals.map(lampParts);
 
   // ═════ 3. Сверловка (после литья): M6 и провод — в узле и в корне каждого рожка ═════

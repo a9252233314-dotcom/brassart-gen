@@ -1693,7 +1693,13 @@ input[type=range] { width: 100%; accent-color: var(--brass); }
         return dr2 * nL[0] + dz * nL[1] > 0 && Math.abs(dr2 * uL[0] + dz * uL[1]) < 70;
       };
       const place = (m2) => m2.rotate([0, 90 - phL / D2R, 0]);
-      man = man.subtract(place(Manifold.cube([140, 400, 200]).translate([-70, -200, 0])).translate([E[0], 0, E[1]]).rotate([0, 0, pt.phi / D2R]));
+      {
+        const box = place(Manifold.cube([140, 400, 200]).translate([-70, -200, 0])).translate([E[0], 0, E[1]]).rotate([0, 0, pt.phi / D2R]);
+        const cut = man.subtract(box);
+        box.delete();
+        man.delete();
+        man = cut;
+      }
       const fn = [];
       for (let t = 0; checks && t < triTag.length; t++) {
         if (triTag[t] > 1) continue;
@@ -1835,16 +1841,21 @@ input[type=range] { width: 100%; accent-color: var(--brass); }
     let petals = [];
     for (let pass = 0; pass < 4; pass++) {
       warn.length = 0;
+      for (const pt of petals) pt.man.delete();
       petals = pets.map((_, i) => buildPetal(i, rhoE, false));
-      const ext = extentOf(petals.flatMap((pt) => {
-        const l = lampParts(pt);
-        return [pt.man, l.plate, l.bulb];
-      }));
+      const tmp = petals.map(lampParts);
+      const ext = extentOf([...petals.map((pt) => pt.man), ...tmp.flatMap((l) => [l.plate, l.bulb])]);
+      for (const l of tmp) {
+        l.plate.delete();
+        l.socket.delete();
+        l.bulb.delete();
+      }
       if (Math.abs(ext - P.diameter / 2) < 0.3) break;
       rhoE += P.diameter / 2 - ext;
     }
     if (opt.checks !== false) {
       warn.length = 0;
+      for (const pt of petals) pt.man.delete();
       petals = pets.map((_, i) => buildPetal(i, rhoE, true));
     }
     const lamps = petals.map(lampParts);
@@ -2068,7 +2079,8 @@ self.onmessage = async (e) => {
   function paramsNow() {
     const P = JSON.parse(JSON.stringify(window.__PARAMS__));
     P.diameter = state.diam; P.seed = state.seed;
-    Object.assign(P.petal, { step_s: 4, profile_pts: 24, rim_pts: 5 });   // превью: сетка грубее
+    const phone = matchMedia('(max-width: 860px)').matches || (navigator.deviceMemory || 8) <= 4;
+    Object.assign(P.petal, phone ? { step_s: 6, profile_pts: 18, rim_pts: 4 } : { step_s: 4, profile_pts: 24, rim_pts: 5 });   // превью: сетка грубее, на телефоне — ещё
     return P;
   }
 
