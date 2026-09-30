@@ -3,7 +3,7 @@
 <div class="app">
   <section class="stage" id="stage" aria-label="3D-вид изделия">
     <div class="tag">ОРБИТА</div>
-    <div class="sub" id="stageSub">генеративная люстра · матовая латунь</div>
+    <div class="sub" id="stageSub">генеративная люстра · латунный лист</div>
     <div class="hint">крутить — мышью или пальцем, приблизить — колесом</div>
     <div class="busy" id="busy"><span id="busyText">Запускаю генератор…</span></div>
   </section>
@@ -11,7 +11,7 @@
   <aside class="panel">
     <div>
       <h1>Семейство ОРБИТА</h1>
-      <p class="lede">Одна литая волнистая лента делает витки вокруг свечей, и каждый виток сдвинут, как орбита. В пересечениях лента идёт то над, то под соседней. У каждого зерна своя орбита.</p>
+      <p class="lede">Одна гладкая лента из латунного листа делает витки вокруг свечей, и каждый виток сдвинут, как орбита. В пересечениях лента идёт то над, то под соседней, а сверху — литая накладка «лежачий полицейский» на болте. У каждого зерна своя орбита.</p>
     </div>
 
     <div class="group">
@@ -39,7 +39,7 @@
 
     <dl class="passport" id="passport"></dl>
     <div class="chips" id="warns"></div>
-    <p class="note">Превью в браузере — сетка грубее, масса ±5%. Куски ленты под печать — в цеховом запуске того же генератора. Центр — узел с 8 рожками и свечами E14 (условно); клетка держится на лодочке под узлом и на хомуте у штанги.</p>
+    <p class="note">Превью в браузере — сетка грубее, масса ±5%. Развёртки полос листа 1:1 с отверстиями под M4 и модели накладок — в цеховом запуске того же генератора. Центр — узел с 8 рожками и свечами E14 (условно); клетка держится на лодочке под узлом и на хомуте у штанги.</p>
   </aside>
 </div>
 
@@ -108,7 +108,7 @@ self.onmessage = async (e) => {
       return { pos, idx };
     };
     const parts = {
-      brass: pack(Manifold.compose([B.band, B.ring, ...B.arms, B.lodochka, B.clamp, ...B.lamps.map((l) => l.socket)])),
+      brass: pack(Manifold.compose([B.band, B.ring, ...B.arms, B.lodochka, B.clamp, ...(B.inserts || []), ...B.lamps.map((l) => l.socket)])),
       bulb: pack(Manifold.compose(B.lamps.map((l) => l.bulb))),
     };
     self.postMessage({ type: 'done', parts, passport: B.passport, warn: B.warn, ms: performance.now() - t }, tr);
@@ -161,14 +161,14 @@ self.onmessage = async (e) => {
   }
 
   function passportView(res) {
-    const q = res.passport, M = q.mass_kg, kg = (x) => `${x.toFixed(1)} кг`, bd = q.band;
+    const q = res.passport, M = q.mass_kg, kg = (x) => `${x.toFixed(1)} кг`, bd = q.band, st = q.strips, ins = q.inserts;
     const rows = [
       ['Латунь (без чаши)', kg(M.total_without_cup), true],
-      ['Лента', `${(bd.length_mm / 1000).toFixed(1)} м · ${bd.turns} витков · ${kg(M.band)}`],
+      ['Лента — лист 1.5, гладкая', `${(bd.length_mm / 1000).toFixed(1)} м · ${bd.turns} витков · ${kg(M.band)}`],
       ['Габарит', `Ø${q.size.diameter_mm} мм`],
-      ['Пересечений', `${bd.crossings} (над / под, потайной M6)`],
-      ['Отливок ленты', `${bd.pieces} кусков под стол принтера`],
-      ['Уклон под съём', `≥ ${Math.round(q.draft_min_deg)}°`],
+      ['Пересечений', `${bd.crossings} · над / под`],
+      ['Литые накладки', ins ? `${ins.count} шт. · болт M4 сквозь ленты` : '—'],
+      ['Полос листа', st ? `${st.count} · развёртки 1:1` : '—'],
       ['Крепление', M.mount],
       ['Центр тяжести от оси', `${q.com_offset_mm.toFixed(1)} мм`],
       ['Лампы', `8 × E14 · до ленты ${q.gaps_mm.lamp_to_band} мм`],

@@ -67,7 +67,24 @@ async function main() {
   }
   const W = (name: string, m: any) => writeStl(join(out, 'view', `${name}.stl`), m.getMesh(), 0.001, `${tag} ${name}`);
   W('band', B.band); W('ring', B.ring); W('arms', Manifold.compose(B.arms)); W('lodochka', B.lodochka); W('rod', B.rod); W('cup', B.cup); W('clamp', B.clamp);
+  if (B.inserts.length) W('inserts', Manifold.compose(B.inserts));
   W('sockets', Manifold.compose(B.lamps.map((l: any) => l.socket))); W('bulbs', Manifold.compose(B.lamps.map((l: any) => l.bulb)));
+  // развёртки полос листа — SVG в миллиметрах, 1:1 (под плоттер / ЧПУ / распечатку по частям)
+  if (B.developments.length) {
+    mkdirSync(join(out, 'strips'), { recursive: true });
+    for (const d of B.developments) {
+      const xs = d.outline.map((p: number[]) => p[0]), ys = d.outline.map((p: number[]) => p[1]);
+      const x0 = Math.min(...xs) - 20, y0 = Math.min(...ys) - 40, W = Math.max(...xs) - x0 + 20, H = Math.max(...ys) - y0 + 20;
+      const pt = (p: number[]) => `${(p[0] - x0).toFixed(2)},${(H - (p[1] - y0)).toFixed(2)}`;
+      const svg = [`<svg xmlns="http://www.w3.org/2000/svg" width="${W.toFixed(1)}mm" height="${H.toFixed(1)}mm" viewBox="0 0 ${W.toFixed(1)} ${H.toFixed(1)}">`,
+        `<polygon points="${d.outline.map(pt).join(' ')}" fill="none" stroke="#000" stroke-width="0.3"/>`,
+        `<polyline points="${d.center.map(pt).join(' ')}" fill="none" stroke="#b05" stroke-width="0.25" stroke-dasharray="6 3"/>`,
+        ...d.holes.map((h: any) => `<circle cx="${(h.p[0] - x0).toFixed(2)}" cy="${(H - (h.p[1] - y0)).toFixed(2)}" r="${(h.d / 2).toFixed(2)}" fill="none" stroke="#000" stroke-width="0.25"><title>${h.what}</title></circle>`),
+        `<text x="10" y="${(H - 8).toFixed(1)}" font-family="sans-serif" font-size="7">ОРБИТА ${tag} · полоса ${d.name} · ${d.len_mm} мм · ${B.passport.material} · пунктир — ось горки · Ø4.5 под M4, Ø3.3 — резьба M4 · 1:1</text>`,
+        '</svg>'].join('\n');
+      writeFileSync(join(out, 'strips', `${d.name}.svg`), svg);
+    }
+  }
   const passport = { ...B.passport, print: fits, warn, build_s: (Date.now() - t0) / 1000 };
   writeFileSync(join(out, 'passport.json'), JSON.stringify(passport, null, 2));
   const { band: bd, ...short } = passport as any;

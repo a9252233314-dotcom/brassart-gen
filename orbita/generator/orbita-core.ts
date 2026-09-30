@@ -49,6 +49,26 @@ function stripSection(w: number, T: number, M: number, m: number) {
   return { pts, tag, M, m };
 }
 
+// сечение листовой ленты: средняя линия с горкой по оси («лежачий полицейский»): y = hb·(1 + cos(π·x/(bw/2)))/2 при |x| < bw/2;
+// стенка T по нормали к средней линии, кромки полукруглые. Порядок и метки — как у stripSection.
+function ridgeSection(w: number, T: number, hb: number, bw: number, M: number, m: number) {
+  const a = w / 2, hT = T / 2, b = bw / 2;
+  const mid: V2[] = [], nu: V2[] = [], tg: V2[] = [];
+  for (let k = 0; k <= M; k++) {
+    const x = -a + 2 * a * k / M, ax = Math.abs(x);
+    const y = ax < b ? hb * (1 + Math.cos(Math.PI * x / b)) / 2 : 0;
+    const dy = ax < b ? -hb * Math.PI / (2 * b) * Math.sin(Math.PI * x / b) : 0;
+    const n = Math.hypot(1, dy);
+    mid.push([x, y]); tg.push([1 / n, dy / n]); nu.push([-dy / n, 1 / n]);
+  }
+  const pts: V2[] = [], tag: number[] = [];
+  for (let k = 0; k <= M; k++) { pts.push([mid[k][0] - hT * nu[k][0], mid[k][1] - hT * nu[k][1]]); tag.push(0); }
+  for (let j = 1; j < m; j++) { const f = Math.PI * j / m, c = mid[M]; pts.push([c[0] + hT * (-Math.cos(f) * nu[M][0] + Math.sin(f) * tg[M][0]), c[1] + hT * (-Math.cos(f) * nu[M][1] + Math.sin(f) * tg[M][1])]); tag.push(2); }
+  for (let k = M; k >= 0; k--) { pts.push([mid[k][0] + hT * nu[k][0], mid[k][1] + hT * nu[k][1]]); tag.push(1); }
+  for (let j = 1; j < m; j++) { const f = Math.PI * j / m, c = mid[0]; pts.push([c[0] + hT * (Math.cos(f) * nu[0][0] - Math.sin(f) * tg[0][0]), c[1] + hT * (Math.cos(f) * nu[0][1] - Math.sin(f) * tg[0][1])]); tag.push(2); }
+  return { pts, tag, M, m };
+}
+
 export function build(P: any, wasm: any, opt: { checks?: boolean } = {}) {
   const { Manifold, Mesh } = wasm;
   const B = P.band, NO = P.node, LO = P.lodochka, LP = P.lamp, VR = P.vary;
@@ -62,7 +82,8 @@ export function build(P: any, wasm: any, opt: { checks?: boolean } = {}) {
   // точка(τ) = Rz(Ω(τ))·Rx(i(τ))·(cos τ, sin τ, 0); τ ∈ [0, 2πN) — замкнуто.
   // i(τ) = mean + amp·cos((τ − τs)/N), amp = 90° − mean → полярный виток проходит ровно через низ (τs = 3π/2) — в лодочку.
   const Nt = B.turns, tauS = 1.5 * Math.PI, TT = 2 * Math.PI * Nt, NS = 6000;
-  const hW = (B.wall + B.weave_gap) / 2;
+  const sheet = B.material === 'sheet';
+  const hW = (B.wall + B.weave_gap) / 2;                              // в пересечении ленты лежат друг на друге
   const R = P.diameter / 2 - B.wall / 2 - B.wave_amp - hW - 2;      // радиус средней линии ленты (габарит ≈ Ø)
   const iMean0 = (B.incl_mean_deg + rnd() * VR.incl_mean_deg) * D2R;
   const Om00 = rnd() * Math.PI, prec0 = R0() < 0.5 ? 1 : -1, wavePh = R0() * 2 * Math.PI;   // направление смещения — тоже подбирается
@@ -190,6 +211,25 @@ export function build(P: any, wasm: any, opt: { checks?: boolean } = {}) {
     const d = R * len(sub(crosses[a].pt, crosses[b].pt));
     if (d < B.width * 0.9) warn.push(`два пересечения ближе ${d.toFixed(0)} мм — почти тройное, проверить`);
   }
+  // куски ленты под печать: режем не на площадках (пересечения, крепления), не длиннее piece_max
+  const pads = [...visits, ...flats];
+  const forbidden = (s: number) => pads.some((v) => Math.abs(ds(v.s, s)) < v.pad + 6);   // режем вне площадок (на переходе можно)
+  let s0 = 0, bestGap = -1;
+  for (let k = 0; k < 720; k++) { const s = Ltot * k / 720; const g = Math.min(...pads.map((v) => Math.abs(ds(v.s, s)) - v.pad)); if (g > bestGap) { bestGap = g; s0 = s; } }
+  const cutAt = (maxLen: number, what: string) => {
+    const cuts = [s0];                                                // s без заворота: от s0 до s0 + L
+    while (s0 + Ltot - cuts[cuts.length - 1] > maxLen) {
+      const last = cuts[cuts.length - 1];
+      let s = last + maxLen;
+      while (forbidden(s) && s > last + 40) s -= 2;
+      if (s <= last + 40) { warn.push(`${what}: рез не удалось поставить вне площадок`); s = last + maxLen; }
+      cuts.push(s);
+    }
+    return cuts.map((sa, k) => ({ sa, sb: k + 1 < cuts.length ? cuts[k + 1] : s0 + Ltot }));
+  };
+  const pieces = cutAt(B.piece_max_mm, 'кусок ленты');
+  const strips = sheet ? cutAt(B.strip_max_mm, 'полоса листа') : [];
+
   const winR = (d: number, pad: number, ramp: number) => 1 - smooth((Math.abs(d) - pad) / Math.max(ramp, 1));   // 1 на площадке, плавно к 0
   const eps = (s: number) => {                                        // смещение по радиусу: «над» / «под»
     let e = 0;
@@ -202,6 +242,14 @@ export function build(P: any, wasm: any, opt: { checks?: boolean } = {}) {
     return 1 - f;
   };
   const wave = (s: number) => B.wave_amp * Math.sin(2 * Math.PI * s / B.wave_len + wavePh) * flatK(s);
+  // «лежачий полицейский»: короткая поперечная горка на всю ширину ленты там, где режется резьба M4 —
+  // у нижней ленты в пересечении (верхняя ложится на неё плоско) и на стыках полос внахлёст; в остальном лента гладкая
+  const bumpS: number[] = [];                                        // v0.2: горки в самой ленте не делаем — см. накладки
+  const bumpAt = (s: number) => {
+    let h = 0;
+    for (const sb of bumpS) { const d = ds(sb, s); if (Math.abs(d) < B.bump_len / 2) h = Math.max(h, B.bump_h * (1 + Math.cos(2 * Math.PI * d / B.bump_len)) / 2); }
+    return h;
+  };
 
   // рамка ленты в точке s: центр, касательная, ширина (n), наружу (u)
   const frameAt = (s: number) => {
@@ -214,7 +262,8 @@ export function build(P: any, wasm: any, opt: { checks?: boolean } = {}) {
   };
 
   // ═════ 3. Лента как тело: протяжка сечения по пути (замкнуто — вся лента; открыто — кусок под печать) ═════
-  const sec = stripSection(B.width, B.wall, B.width_pts, B.edge_pts);
+  const secAt = (_s: number) => stripSection(B.width, B.wall, B.width_pts, B.edge_pts);
+  const sec = secAt(0);
   const K = sec.pts.length;
   function sweep(sa: number, sb: number, closed: boolean) {
     const n = Math.max(2, Math.ceil((sb - sa) / B.step_mm)) + (closed ? 0 : 1);
@@ -222,8 +271,9 @@ export function build(P: any, wasm: any, opt: { checks?: boolean } = {}) {
     for (let j = 0; j < n; j++) {
       const s = sa + (sb - sa) * j / (closed ? n : n - 1), F = frameAt(s);
       const idx: number[] = [];
-      for (const [x, y] of sec.pts) {
-        const p = add(add(F.c, mul(F.n, x)), mul(F.u, y + F.w - x * x / (2 * R)));   // поперёк — по шару (пояс глобуса)
+      const sj = sheet ? secAt(s) : sec;
+      for (const [x, y] of sj.pts) {
+        const p = add(add(F.c, mul(F.n, x)), mul(F.u, y + F.w - (sheet ? 0 : x * x / (2 * R))));   // литьё — поперёк по шару; лист — прямо (гнётся без растяжки)
         idx.push(verts.length / 3); verts.push(p[0], p[1], p[2]);
       }
       loops.push(idx);
@@ -253,6 +303,25 @@ export function build(P: any, wasm: any, opt: { checks?: boolean } = {}) {
     return { man, verts, tri, tag, triS };
   }
   const band = sweep(0, Ltot, true);
+
+  // литая накладка «лежачий полицейский»: горка поперёк ленты на всю ширину, ставится сверху на ленту, M4 — сквозь ленты
+  // в накладку (мастер 2026-09-30). В пересечении — на верхнюю ленту, на стыке полос внахлёст — длиннее, на 2 болта
+  const IN = P.insert;
+  function insertAt(sv: number, L: number) {
+    const F = frameAt(sv), pts: V2[] = [], n = 24;
+    for (let k = 0; k <= n; k++) { const x = -L / 2 + L * k / n; pts.push([x, IN.h * (1 + Math.cos(2 * Math.PI * x / L)) / 2 + 0.01]); }
+    const poly: V2[] = [[-L / 2, 0], [L / 2, 0], ...pts.reverse()];   // низ слева направо, горка справа налево — против часовой
+    const cs = new wasm.CrossSection([poly], 'Positive');
+    const ex = cs.extrude(B.width * IN.w_frac).translate([0, 0, -B.width * IN.w_frac / 2]);
+    const o = add(F.c, mul(F.u, B.wall / 2 + (F.w || 0)));             // на наружной стороне ленты
+    const Z = mul(F.n, -1);                                             // X — вдоль ленты, Y — наружу, Z — поперёк (правая тройка)
+    const M = [F.T[0], F.T[1], F.T[2], 0, F.u[0], F.u[1], F.u[2], 0, Z[0], Z[1], Z[2], 0, o[0], o[1], o[2], 1];
+    return ex.transform(M as any);
+  }
+  const insS = sheet ? [...visits.filter((v) => v.sign > 0).map((v) => ({ s: v.s, L: IN.len })),
+    ...strips.slice(1).map((st) => ({ s: st.sa + B.splice_overlap / 2, L: IN.splice_len })),
+    ...(strips.length > 1 ? [{ s: s0 + Ltot + B.splice_overlap / 2, L: IN.splice_len }] : [])] : [];
+  const inserts = insS.map((q) => insertAt(q.s, q.L));
 
   // ═════ 4. Узел CELL, рожки со свечами, лодочка, штанга ═════
   const zH = NO.z_rel * R;                                             // центр кольца узла
@@ -374,21 +443,6 @@ export function build(P: any, wasm: any, opt: { checks?: boolean } = {}) {
   const clampChoice = { sides, pick: 0 };
   const bottomOff = Math.hypot(Fb.c[0], Fb.c[1]);
 
-  // куски ленты под печать: режем не на площадках (пересечения, крепления), не длиннее piece_max
-  const pads = [...visits, ...flats];
-  const forbidden = (s: number) => pads.some((v) => Math.abs(ds(v.s, s)) < v.pad + 6);   // режем вне площадок (на переходе можно)
-  let s0 = 0, bestGap = -1;
-  for (let k = 0; k < 720; k++) { const s = Ltot * k / 720; const g = Math.min(...pads.map((v) => Math.abs(ds(v.s, s)) - v.pad)); if (g > bestGap) { bestGap = g; s0 = s; } }
-  const cuts = [s0];                                                  // s без заворота: от s0 до s0 + L
-  while (s0 + Ltot - cuts[cuts.length - 1] > B.piece_max_mm) {
-    const last = cuts[cuts.length - 1];
-    let s = last + B.piece_max_mm;
-    while (forbidden(s) && s > last + 40) s -= 2;
-    if (s <= last + 40) { warn.push('кусок ленты не удалось отрезать вне площадок'); s = last + B.piece_max_mm; }
-    cuts.push(s);
-  }
-  const pieces = cuts.map((sa, k) => ({ sa, sb: k + 1 < cuts.length ? cuts[k + 1] : s0 + Ltot }));
-
   // съём каждого куска: разъём по кромкам, тянется по радиусу (наружу / к центру)
   let draftMin = 90;
   const pieceInfo: any[] = [];
@@ -397,7 +451,7 @@ export function build(P: any, wasm: any, opt: { checks?: boolean } = {}) {
     const sw = sweep(pc.sa, pc.sb, false);
     const Fm = frameAt((pc.sa + pc.sb) / 2), d = Fm.u;
     let dm = 90;
-    if (opt.checks !== false) for (let t = 0; t < sw.tag.length; t++) {
+    if (opt.checks !== false && !sheet) for (let t = 0; t < sw.tag.length; t++) {
       if (sw.tag[t] > 1) continue;
       const ia = sw.tri[3 * t] * 3, ib = sw.tri[3 * t + 1] * 3, ic = sw.tri[3 * t + 2] * 3, v = sw.verts;
       const nn = cross([v[ib] - v[ia], v[ib + 1] - v[ia + 1], v[ib + 2] - v[ia + 2]], [v[ic] - v[ia], v[ic + 1] - v[ia + 1], v[ic + 2] - v[ia + 2]]);
@@ -411,7 +465,7 @@ export function build(P: any, wasm: any, opt: { checks?: boolean } = {}) {
     printJobs.push({ name, what: 'лента', m: sw.man, base: [e, cross(d, e), d] });
     pieceInfo.push({ name, len_mm: +(pc.sb - pc.sa).toFixed(0), draft: +dm.toFixed(1), kg: +kg(sw.man.volume()).toFixed(3) });
   });
-  if (opt.checks !== false && draftMin < B.draft_min_deg) warn.push(`уклон под съём ${draftMin.toFixed(1)}° < ${B.draft_min_deg}°`);
+  if (opt.checks !== false && !sheet && draftMin < B.draft_min_deg) warn.push(`уклон под съём ${draftMin.toFixed(1)}° < ${B.draft_min_deg}°`);
   // ленты не проходят друг сквозь друга: куски попарно (соседние по ленте касаются торцами — их не считаем)
   let clashMax = 0, clashN = 0;
   if (opt.checks !== false) {
@@ -433,6 +487,43 @@ export function build(P: any, wasm: any, opt: { checks?: boolean } = {}) {
   const clampWho = [pick === 0 ? 'лапка над лентой' : 'лапка под лентой', `задевает: над ${hits[0].toFixed(0)}, под ${hits[1].toFixed(0)} мм³`];
   if (clampClash > 0.5) warn.push(`хомут у штанги задевает ленту: ${clampClash.toFixed(0)} мм³`);
   printJobs.push({ name: 'LOD', what: 'лодочка', m: lodochka, base: [[1, 0, 0], [0, 1, 0], [0, 0, 1]] });
+  if (sheet && inserts.length) {
+    const I1 = insertAt(0, IN.len), I2 = insertAt(0, IN.splice_len);
+    const Fz = frameAt(0);
+    printJobs.push({ name: 'INS-X', what: 'накладка (пересечение)', m: I1, base: [Fz.T, Fz.n, Fz.u].map((v) => [...v]) as any },   // горкой вверх
+                   { name: 'INS-S', what: 'накладка (стык полос)', m: I2, base: [Fz.T, Fz.n, Fz.u].map((v) => [...v]) as any });
+  }
+  const printOut = sheet ? printJobs.filter((j) => j.what !== 'лента') : printJobs;   // лист не печатается — гнётся из полос
+
+  // развёртки полос листа 1:1: ось с кривизной κg (кривизна пути по шару), контур ±w/2, отверстия M4:
+  // пересечение сверху — Ø4.5 (под M4), снизу — Ø3.3 (резьба M4 в горке); лодочка и лапка хомута — Ø4.5; стык внахлёст — по 2 отверстия
+  const develop = (sa: number, sb: number, idx: number) => {
+    const ext = B.splice_overlap, st = 2, n = Math.ceil((sb + ext - sa) / st);
+    const kg_ = (s: number) => { const a = frameAt(s - 1), b = frameAt(s + 1), c = frameAt(s); return dot(sub(b.T, a.T), c.n) / 2; };
+    const cl: V2[] = [], nrm: V2[] = [], sArr: number[] = [];
+    let x = 0, y = 0, th = 0;
+    for (let k = 0; k <= n; k++) {
+      const s = sa + (sb + ext - sa) * k / n;
+      cl.push([x, y]); nrm.push([-Math.sin(th), Math.cos(th)]); sArr.push(s);
+      const h = (sb + ext - sa) / n;
+      th += kg_(s) * h; x += Math.cos(th) * h; y += Math.sin(th) * h;
+    }
+    const at = (s: number): V2 => { const k = clamp(Math.round((s - sa) / ((sb + ext - sa) / n)), 0, n); return cl[k]; };
+    const holes: { p: V2; d: number; what: string }[] = [];
+    const inStrip = (s: number) => { const d = ((s - sa) % Ltot + Ltot) % Ltot; return d <= sb + ext - sa ? sa + d : null; };
+    for (const v of visits) { const sv = inStrip(v.s); if (sv !== null) holes.push({ p: at(sv), d: 4.5, what: v.sign > 0 ? 'пересечение, лента сверху (под накладкой) — Ø4.5, M4' : 'пересечение, лента снизу — Ø4.5, M4' }); }
+    for (const v of flats) { const sv = inStrip(v.s); if (sv !== null) holes.push({ p: at(sv), d: 4.5, what: v.kind === 'лодочка' ? 'лодочка — Ø4.5 под M4' : 'лапка хомута — Ø4.5 под M4' }); }
+    for (const e of [10, 30]) {
+      holes.push({ p: at(sa + e), d: 4.5, what: 'стык внахлёст (начало) — Ø4.5, M4 в накладку' });
+      holes.push({ p: at(sb + e), d: 4.5, what: 'стык внахлёст (конец) — Ø4.5, M4 в накладку' });
+    }
+    const left = cl.map((c, k) => [c[0] + nrm[k][0] * B.width / 2, c[1] + nrm[k][1] * B.width / 2] as V2);
+    const right = cl.map((c, k) => [c[0] - nrm[k][0] * B.width / 2, c[1] - nrm[k][1] * B.width / 2] as V2);
+    const kmax = Math.max(...sArr.map((s) => Math.abs(kg_(s))));
+    return { name: `S${String(idx + 1).padStart(2, '0')}`, len_mm: +(sb + ext - sa).toFixed(0), center: cl, outline: [...left, ...right.reverse()], holes,
+      min_edge_radius_mm: kmax > 1e-6 ? +(1 / kmax).toFixed(0) : null };
+  };
+  const developments = strips.map((st, k) => develop(st.sa, st.sb, k));
 
   // масса и центр тяжести
   const mp = (m: any) => massProps(m.getMesh());
@@ -442,6 +533,7 @@ export function build(P: any, wasm: any, opt: { checks?: boolean } = {}) {
   const parts: { kg: number; c: V3 }[] = [
     { kg: kg(bandMP.vol), c: bandMP.c }, { kg: kg(ringMP.vol), c: ringMP.c }, { kg: kg(lodMP.vol), c: lodMP.c }, { kg: kg(rodMP.vol), c: rodMP.c },
     { kg: kg(clampMP.vol), c: clampMP.c },
+    ...inserts.map((m) => { const q = mp(m); return { kg: kg(q.vol), c: q.c }; }),
     ...armMP.map((q) => ({ kg: kg(q.vol) * tubeK, c: q.c })), ...lampsA.map((l) => ({ kg: LP.socket_bulb_kg, c: l.base })),
   ];
   const total = parts.reduce((s, q) => s + q.kg, 0);
@@ -456,6 +548,7 @@ export function build(P: any, wasm: any, opt: { checks?: boolean } = {}) {
     band: { turns: Nt, length_mm: +Ltot.toFixed(0), incl_deg: [+((iMean - iAmp) / D2R).toFixed(0), 90], crossings: crosses.length,
       min_cross_angle_deg: crosses.length ? +(Math.min(...crosses.map((c) => c.ang)) / D2R).toFixed(0) : null, pieces: pieces.length, pieces_info: pieceInfo },
     joints_m6: { crossings: crosses.length, lodochka: 1, rod: 1, total: crosses.length + 2 },
+    joints_m4: sheet ? { crossings: crosses.length, lodochka: 1, clamp: 1, splices: strips.length * 2, total: crosses.length + 2 + strips.length * 2 } : null,
     mass_kg: { band: +kg(bandMP.vol).toFixed(2), node_ring: +kg(ringMP.vol).toFixed(2), arms: +armMP.reduce((s, q) => s + kg(q.vol) * tubeK, 0).toFixed(2),
       lodochka: +kg(lodMP.vol).toFixed(2), rod: +kg(rodMP.vol).toFixed(2), clamp: +kg(clampMP.vol).toFixed(2), sockets_lamps: +(nA * LP.socket_bulb_kg).toFixed(2), total_without_cup: +total.toFixed(2),
       mount: total > P.heavy_mount_kg ? 'усиленное (> 15 кг)' : 'обычное' },
@@ -463,9 +556,14 @@ export function build(P: any, wasm: any, opt: { checks?: boolean } = {}) {
     gaps_mm: { lamp_to_band: +lampGap.toFixed(0), arm_to_band: +armGap.toFixed(0), rod: rodPass, lodochka_offset_from_axis: +bottomOff.toFixed(1) },
     draft_min_deg: +draftMin.toFixed(1),
     band_clash: { places: clashN, max_mm3: +clashMax.toFixed(1) },
+    material: sheet ? `лист ${B.wall} мм, ${B.sheet_grade}; гладкая; стыки — литые накладки «лежачий полицейский», M4 сквозь ленты` : `литьё ${B.wall} мм`,
+    inserts: sheet ? { count: inserts.length, crossing: visits.filter((v) => v.sign > 0).length, splice: inserts.length - visits.filter((v) => v.sign > 0).length,
+      size_mm: `${IN.len}×${B.width * IN.w_frac}×${IN.h} (стык ${IN.splice_len})`, kg: +inserts.reduce((a, m) => a + kg(m.volume()), 0).toFixed(2) } : null,
+    strips: sheet ? { count: strips.length, lengths_mm: developments.map((d) => d.len_mm), holes_m4: developments.reduce((a, d) => a + d.holes.length, 0),
+      min_edge_radius_mm: Math.min(...developments.map((d) => d.min_edge_radius_mm ?? 1e9)) } : null,
     clamp: { z_mm: +clampSel.zc.toFixed(0), tab_len_mm: +(dRod + CL.tab_beyond).toFixed(0), clash_mm3: +clampClash.toFixed(1), side: clampWho[0], note: clampWho[1] },
     touch_zones: touchZones.map((z) => ({ s: +z.s.toFixed(0), s2: +z.s2.toFixed(0), d_mm: +z.d.toFixed(0), p: mul(unit(tauOf(z.s)), R).map((v) => +v.toFixed(0)) })),
     crossings_at: crosses.map((c) => ({ p: mul(c.pt, R).map((v) => +v.toFixed(0)), ang: +(c.ang / D2R).toFixed(0) })),
   };
-  return { passport, warn, band: band.man, ring, arms, lamps: lampsA, lodochka, rod, cup, clamp: clampSel.m, printJobs, kg, vertsOf, tag: passport.tag };
+  return { passport, warn, band: band.man, ring, arms, lamps: lampsA, lodochka, rod, cup, clamp: clampSel.m, inserts, printJobs: printOut, developments, kg, vertsOf, tag: passport.tag };
 }
