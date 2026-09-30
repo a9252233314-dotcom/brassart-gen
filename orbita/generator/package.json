@@ -1,0 +1,9 @@
+{
+  "name": "brassart-orbita-generator",
+  "private": true,
+  "type": "module",
+  "description": "Brass Art — генератор семейства ОРБИТА (лента-орбита вокруг свечей). v0.1.",
+  "dependencies": {
+    "manifold-3d": "^3.5.4"
+  }
+}

@@ -89,7 +89,10 @@ input[type=range] { width: 100%; accent-color: var(--brass); }
 @media (max-width: 860px) {
   .fam-nav .brand { flex: 1 0 100%; }
   .fam-tabs { flex: 1 0 100%; }
-  .fam-tab { flex: 1 1 0; }
+  .fam-tab { flex: 1 1 0; flex-direction: column; gap: 4px; padding: 8px 4px; text-align: center; }
+  .fam-tab svg { width: 30px; height: 30px; }
+  .fam-tab b { font-size: 14px; }
+  .fam-tab span { display: none; }
   .fam-nav + .app .stage { height: 60vh; }
 }
 </style>
@@ -116,6 +119,16 @@ input[type=range] { width: 100%; accent-color: var(--brass); }
         <path d="M5.5 26v-4M34.5 26v-4M7 33v-4M33 33v-4"/>
       </svg>
       <div><b>ЛЕПЕСТОК</b><span>лепестки вокруг вазы</span></div>
+    </a>
+    <a class="fam-tab" href="orbita.html" data-fam="orbita">
+      <svg viewBox="0 0 40 40" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round">
+        <path d="M20 1v5"/>
+        <circle cx="20" cy="22" r="15"/>
+        <ellipse cx="20" cy="22" rx="15" ry="5.5" transform="rotate(-24 20 22)"/>
+        <ellipse cx="20" cy="22" rx="5.5" ry="15" transform="rotate(28 20 22)"/>
+        <circle cx="20" cy="22" r="1.6" fill="currentColor" stroke="none"/>
+      </svg>
+      <div><b>ОРБИТА</b><span>лента-орбита</span></div>
     </a>
   </div>
 </nav>

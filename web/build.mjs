@@ -3,12 +3,14 @@
 // Запуск из корня репозитория:  node web/build.mjs
 //   → index.html     — CELL (шар-решётка)
 //   → lepestok.html  — ЛЕПЕСТОК (лепестки вокруг вазы)
+//   → orbita.html    — ОРБИТА (лента-орбита вокруг свечей)
 import { readFileSync, writeFileSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 
 const esb = (cwd, out) => execSync(`npx --yes esbuild web.ts --bundle --format=iife --target=es2020 --outfile=${out} --log-level=warning`, { cwd, stdio: 'inherit' });
 esb('generator', '../web/cell-core.js');
 esb('lepestok/generator', '../web/lepestok-core.js');
+esb('orbita/generator', '../web/orbita-core.js');
 
 const nm = 'generator/node_modules/';
 const safe = (s) => s.replaceAll('</script', '<\\/script');
@@ -26,6 +28,9 @@ const families = [
   { fam: 'lepestok', out: 'lepestok.html', tpl: ['lepestok/web/page_template.html', 'lepestok/web/page_body.html'], core: 'lepestok/web/lepestok-core.js',
     marker: '/*__LEP_CORE__*/', params: 'lepestok/params.json',
     desc: 'Brass Art · ЛЕПЕСТОК — генеративная латунная люстра: лепестки в два яруса вокруг гранёной вазы собираются прямо в браузере.' },
+  { fam: 'orbita', out: 'orbita.html', tpl: ['orbita/web/page_template.html', 'orbita/web/page_body.html'], core: 'orbita/web/orbita-core.js',
+    marker: '/*__ORB_CORE__*/', params: 'orbita/params.json',
+    desc: 'Brass Art · ОРБИТА — генеративная латунная люстра: одна волнистая лента делает витки вокруг свечей, как орбита.' },
 ];
 
 for (const f of families) {

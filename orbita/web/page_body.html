@@ -1,0 +1,227 @@
+
+<!--__FAMILY_NAV__-->
+<div class="app">
+  <section class="stage" id="stage" aria-label="3D-вид изделия">
+    <div class="tag">ОРБИТА</div>
+    <div class="sub" id="stageSub">генеративная люстра · матовая латунь</div>
+    <div class="hint">крутить — мышью или пальцем, приблизить — колесом</div>
+    <div class="busy" id="busy"><span id="busyText">Запускаю генератор…</span></div>
+  </section>
+
+  <aside class="panel">
+    <div>
+      <h1>Семейство ОРБИТА</h1>
+      <p class="lede">Одна литая волнистая лента делает витки вокруг свечей, и каждый виток сдвинут, как орбита. В пересечениях лента идёт то над, то под соседней. У каждого зерна своя орбита.</p>
+    </div>
+
+    <div class="group">
+      <label for="diam">Ширина <output id="diamOut">650 мм</output></label>
+      <input id="diam" type="range" min="650" max="850" step="50" value="650">
+    </div>
+
+    <div class="group">
+      <span class="lbl">Витков ленты</span>
+      <div class="seg" role="group" aria-label="Витков ленты">
+        <button id="turns-4" type="button" aria-pressed="false">4</button>
+        <button id="turns-5" type="button" aria-pressed="true">5</button>
+      </div>
+    </div>
+
+    <div class="group">
+      <label for="rod">Подвес <output id="rodOut">0.4 м</output></label>
+      <input id="rod" type="range" min="300" max="3000" step="100" value="400">
+    </div>
+
+    <div class="row">
+      <button class="btn" id="again" type="button">Ещё вариант</button>
+      <span class="seed">зерно <span id="seed">1</span></span>
+    </div>
+
+    <dl class="passport" id="passport"></dl>
+    <div class="chips" id="warns"></div>
+    <p class="note">Превью в браузере — сетка грубее, масса ±5%. Куски ленты под печать — в цеховом запуске того же генератора. Центр — узел с 8 рожками и свечами E14 (условно); клетка держится на лодочке под узлом и на хомуте у штанги.</p>
+  </aside>
+</div>
+
+<script>/*__THREE__*/</script>
+<script type="text/plain" id="src-manifold">/*__MANIFOLD_JS__*/</script>
+<script type="text/plain" id="src-core">/*__ORB_CORE__*/</script>
+<script>
+window.__MANIFOLD_WASM__ = "/*__MANIFOLD_WASM__*/";
+window.__PARAMS__ = /*__PARAMS__*/;
+</script>
+<script>
+(() => {
+  const fl = document.createElement('link');
+  fl.rel = 'stylesheet';
+  fl.href = 'https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Tenor+Sans&display=swap';
+  document.head.appendChild(fl);
+
+  const $ = (id) => document.getElementById(id);
+  const busy = $('busy'), busyText = $('busyText');
+  if (!window.THREE || !THREE.OrbitControls) { busyText.textContent = '3D не запустилось в этом браузере — обновите браузер.'; return; }
+  const state = { diam: 650, turns: 5, rod: 400, seed: 1 };
+
+  // ── 3D ──
+  const stage = $('stage');
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+  renderer.outputEncoding = THREE.sRGBEncoding;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.0;
+  stage.prepend(renderer.domElement);
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x0c0b09);
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  scene.environment = pmrem.fromScene(new THREE.RoomEnvironment(), 0.04).texture;
+  const camera = new THREE.PerspectiveCamera(35, 1, 0.01, 50);
+  const controls = new THREE.OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  const key = new THREE.DirectionalLight(0xfff1dc, 1.5); key.position.set(1.5, 2, 1.8); scene.add(key);
+  const under = new THREE.DirectionalLight(0xffe2b8, 0.45); under.position.set(-0.8, -2, 0.6); scene.add(under);
+  const glow = new THREE.PointLight(0xffc27a, 1.3, 3); scene.add(glow);
+  const brass = new THREE.MeshStandardMaterial({ color: 0xc09046, metalness: 0.8, roughness: 0.5, side: THREE.DoubleSide });   // матовая латунь
+  const bulbMat = new THREE.MeshStandardMaterial({ color: 0xfff4e0, emissive: 0xffd9a0, emissiveIntensity: 1.2, roughness: 0.4 });
+  let group = null, last = null;
+  const resize = () => {
+    const w = stage.clientWidth, h = stage.clientHeight;
+    renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix();
+  };
+  new ResizeObserver(resize).observe(stage); resize();
+  renderer.setAnimationLoop(() => { controls.update(); renderer.render(scene, camera); });
+
+  // ── генератор в фоновом процессе: страница не замирает; каждая сборка — свежий процесс ──
+  const WORKER_MAIN = `
+self.onmessage = async (e) => {
+  try {
+    const { P, wasm: bin } = e.data;
+    const wasm = await self.ManifoldModule({ wasmBinary: bin, locateFile: (p) => p });
+    wasm.setup();
+    const t = performance.now();
+    const B = self.ORBITA.build(P, wasm);
+    const { Manifold } = wasm, tr = [];
+    const pack = (m) => {
+      const g = m.getMesh(), np = g.numProp, vp = g.vertProperties;
+      const pos = new Float32Array((vp.length / np) * 3);
+      for (let i = 0, j = 0; i < vp.length; i += np, j += 3) { pos[j] = vp[i]; pos[j + 1] = vp[i + 1]; pos[j + 2] = vp[i + 2]; }
+      const idx = new Uint32Array(g.triVerts); tr.push(pos.buffer, idx.buffer);
+      return { pos, idx };
+    };
+    const parts = {
+      brass: pack(Manifold.compose([B.band, B.ring, ...B.arms, B.lodochka, B.clamp, ...B.lamps.map((l) => l.socket)])),
+      bulb: pack(Manifold.compose(B.lamps.map((l) => l.bulb))),
+    };
+    self.postMessage({ type: 'done', parts, passport: B.passport, warn: B.warn, ms: performance.now() - t }, tr);
+  } catch (err) {
+    self.postMessage({ type: 'error', message: String((err && err.message) || err) });
+  }
+};`;
+  const workerUrl = URL.createObjectURL(new Blob([
+    $('src-manifold').textContent, '\n', $('src-core').textContent, '\n', WORKER_MAIN,
+  ], { type: 'text/javascript' }));
+  const wasmBytes = Uint8Array.from(atob(window.__MANIFOLD_WASM__), (c) => c.charCodeAt(0));
+
+  function paramsNow() {
+    const P = JSON.parse(JSON.stringify(window.__PARAMS__));
+    P.diameter = state.diam; P.seed = state.seed; P.band.turns = state.turns;
+    const phone = matchMedia('(max-width: 860px)').matches || (navigator.deviceMemory || 8) <= 4;
+    Object.assign(P.band, phone ? { step_mm: 4, width_pts: 6, edge_pts: 4 } : { step_mm: 3, width_pts: 7, edge_pts: 4 });   // превью: сетка грубее
+    return P;
+  }
+
+  const geoOf = (m) => {
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(m.pos, 3));
+    geo.setIndex(new THREE.BufferAttribute(m.idx, 1));
+    geo.computeVertexNormals(); geo.computeBoundingBox();
+    return geo;
+  };
+
+  function show(res) {
+    if (group) { scene.remove(group); group.traverse((o) => o.geometry && o.geometry.dispose()); }
+    group = new THREE.Group();
+    const body = new THREE.Mesh(geoOf(res.parts.brass), brass); group.add(body);
+    group.add(new THREE.Mesh(geoOf(res.parts.bulb), bulbMat));
+    const bb = body.geometry.boundingBox, R = res.passport.size.sphere_R_mm;
+    const zTop = R, zBot = res.passport.size.low_z, zHub = res.passport.size.hub_z;
+    // штанга — от узла внутри сферы вверх; над сферой видна на «подвес»
+    const rodLen = zTop + state.rod - zHub;
+    const rod = new THREE.Mesh(new THREE.CylinderGeometry(6, 6, rodLen, 16), brass);
+    rod.rotation.x = Math.PI / 2; rod.position.z = zHub + rodLen / 2; group.add(rod);
+    const cup = new THREE.Mesh(new THREE.CylinderGeometry(45, 36, 25, 40), brass);
+    cup.rotation.x = Math.PI / 2; cup.position.z = zTop + state.rod + 12; group.add(cup);
+    group.scale.setScalar(0.001);
+    group.rotation.x = -Math.PI / 2;                          // Z генератора — вверх
+    scene.add(group);
+    glow.position.set(0, 0.02, 0);
+    const Rm = state.diam / 2000, H = (zTop - Math.min(zBot, bb.min.z)) / 1000, zc = (zTop + zBot) / 2000;
+    const fit = Math.max(Rm, H * 0.62) * 1.3 / Math.sin((camera.fov * Math.PI) / 360) / Math.min(1, camera.aspect);
+    controls.target.set(0, zc, 0);
+    camera.position.set(0.66 * fit, zc + 0.14 * fit, 0.75 * fit);
+  }
+
+  function passportView(res) {
+    const q = res.passport, M = q.mass_kg, kg = (x) => `${x.toFixed(1)} кг`, bd = q.band;
+    const rows = [
+      ['Латунь (без чаши)', kg(M.total_without_cup), true],
+      ['Лента', `${(bd.length_mm / 1000).toFixed(1)} м · ${bd.turns} витков · ${kg(M.band)}`],
+      ['Габарит', `Ø${q.size.diameter_mm} мм`],
+      ['Пересечений', `${bd.crossings} (над / под, потайной M6)`],
+      ['Отливок ленты', `${bd.pieces} кусков под стол принтера`],
+      ['Уклон под съём', `≥ ${Math.round(q.draft_min_deg)}°`],
+      ['Крепление', M.mount],
+      ['Центр тяжести от оси', `${q.com_offset_mm.toFixed(1)} мм`],
+      ['Лампы', `8 × E14 · до ленты ${q.gaps_mm.lamp_to_band} мм`],
+      ['Подвес', `${(state.rod / 1000).toFixed(1)} м`],
+      ['Собрано за', `${(res.ms / 1000).toFixed(1)} с`],
+    ];
+    $('passport').innerHTML = rows.map(([k, v, big]) => `<dt>${k}</dt><dd${big ? ' class="big"' : ''}>${v}</dd>`).join('');
+  }
+
+  let worker = null, jobId = 0, tick = 0;
+  function run() {
+    if (worker) { worker.terminate(); worker = null; }
+    const id = ++jobId;
+    const P = paramsNow();
+    const label = `Генерирую · Ø${state.diam}, ${state.turns} витков, зерно ${state.seed}`;
+    const t0 = performance.now();
+    busy.hidden = false; busyText.textContent = label + '…'; $('again').disabled = true;
+    clearInterval(tick);
+    tick = setInterval(() => { busyText.textContent = `${label} · ${Math.floor((performance.now() - t0) / 1000)} с`; }, 250);
+    const done = () => { clearInterval(tick); if (worker) worker.terminate(); worker = null; busy.hidden = true; $('again').disabled = false; };
+    try {
+      worker = new Worker(workerUrl, { type: 'module' });
+    } catch (e) {
+      done(); $('warns').innerHTML = '<span class="chip">Браузер не умеет считать в фоне — обновите его (Chrome, Edge, Safari 15+, Firefox 114+).</span>';
+      return;
+    }
+    worker.onmessage = (e) => {
+      if (id !== jobId) return;
+      const m = e.data; done();
+      if (m.type === 'done') {
+        last = m; show(m); passportView(m);
+        $('warns').innerHTML = m.warn.length ? m.warn.map((x) => `<span class="chip">${x}</span>`).join('') : '<span class="chip ok">все проверки пройдены</span>';
+        $('stageSub').textContent = `Ø${state.diam} · ${state.turns} витков · зерно ${state.seed}`;
+      } else {
+        $('warns').innerHTML = `<span class="chip">Не собралось: ${m.message}. Нажмите «Ещё вариант».</span>`;
+      }
+    };
+    worker.onerror = (e) => {
+      if (id !== jobId) return;
+      done(); $('warns').innerHTML = `<span class="chip">Генератор остановился: ${e.message || 'ошибка в фоновом процессе'}.</span>`;
+    };
+    worker.postMessage({ P, wasm: wasmBytes });
+  }
+
+  const pressed = (ids, on) => ids.forEach((i) => $(i).setAttribute('aria-pressed', String(i === on)));
+  let timer = 0;
+  const later = () => { clearTimeout(timer); timer = setTimeout(run, 300); };
+  $('diam').oninput = (e) => { state.diam = +e.target.value; $('diamOut').textContent = state.diam + ' мм'; };
+  $('diam').onchange = later;
+  for (const n of [4, 5]) $('turns-' + n).onclick = () => { state.turns = n; pressed(['turns-4', 'turns-5'], 'turns-' + n); later(); };
+  $('rod').oninput = (e) => { state.rod = +e.target.value; $('rodOut').textContent = (state.rod / 1000).toFixed(1) + ' м'; };
+  $('rod').onchange = () => { if (last) { show(last); passportView(last); } };
+  $('again').onclick = () => { state.seed += 1; $('seed').textContent = state.seed; run(); };
+  run();
+})();
+</script>
