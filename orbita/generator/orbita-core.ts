@@ -228,7 +228,29 @@ export function build(P: any, wasm: any, opt: { checks?: boolean } = {}) {
     return cuts.map((sa, k) => ({ sa, sb: k + 1 < cuts.length ? cuts[k + 1] : s0 + Ltot }));
   };
   const pieces = cutAt(B.piece_max_mm, 'кусок ленты');
-  const strips = sheet ? cutAt(B.strip_max_mm, 'полоса листа') : [];
+  // полосы листа: стык — в пересечении (концы заходят друг на друга под накладкой, тот же болт M4) — мастер: накладки только на стыках
+  const stripsAtCross = () => {
+    const vs = [...new Set(visits.map((v) => v.s))].sort((a, b) => a - b);
+    const ov = P.insert.len, maxL = B.strip_max_mm - ov;
+    let best: { cuts: number[]; minL: number } | null = null;
+    for (const st of vs) {
+      const cuts = [st];
+      while (true) {
+        const last = cuts[cuts.length - 1], left = st + Ltot - last;
+        if (left <= maxL) break;
+        const cand = vs.map((v) => (v - last + Ltot) % Ltot).filter((d) => d > 1 && d <= maxL);
+        if (!cand.length) { cuts.length = 0; break; }
+        cuts.push(last + Math.max(...cand));
+      }
+      if (!cuts.length) continue;
+      const segs = cuts.map((a, k) => (k + 1 < cuts.length ? cuts[k + 1] : st + Ltot) - a), minL = Math.min(...segs);
+      if (!best || cuts.length < best.cuts.length || (cuts.length === best.cuts.length && minL > best.minL)) best = { cuts, minL };
+    }
+    if (!best) { warn.push('полосы: между пересечениями длиннее листа — стык вне пересечения'); return cutAt(B.strip_max_mm, 'полоса листа'); }
+    const c = best.cuts;
+    return c.map((a, k) => ({ sa: a, sb: k + 1 < c.length ? c[k + 1] : c[0] + Ltot }));
+  };
+  const strips = sheet ? stripsAtCross() : [];
 
   const winR = (d: number, pad: number, ramp: number) => 1 - smooth((Math.abs(d) - pad) / Math.max(ramp, 1));   // 1 на площадке, плавно к 0
   const eps = (s: number) => {                                        // смещение по радиусу: «над» / «под»
@@ -318,9 +340,7 @@ export function build(P: any, wasm: any, opt: { checks?: boolean } = {}) {
     const M = [F.T[0], F.T[1], F.T[2], 0, F.u[0], F.u[1], F.u[2], 0, Z[0], Z[1], Z[2], 0, o[0], o[1], o[2], 1];
     return ex.transform(M as any);
   }
-  const insS = sheet ? [...visits.filter((v) => v.sign > 0).map((v) => ({ s: v.s, L: IN.len })),
-    ...strips.slice(1).map((st) => ({ s: st.sa + B.splice_overlap / 2, L: IN.splice_len })),
-    ...(strips.length > 1 ? [{ s: s0 + Ltot + B.splice_overlap / 2, L: IN.splice_len }] : [])] : [];
+  const insS = sheet ? visits.filter((v) => v.sign > 0).map((v) => ({ s: v.s, L: IN.len })) : [];   // одна модель, одна горка
   const inserts = insS.map((q) => insertAt(q.s, q.L));
 
   // ═════ 4. Узел CELL, рожки со свечами, лодочка, штанга ═════
@@ -488,17 +508,16 @@ export function build(P: any, wasm: any, opt: { checks?: boolean } = {}) {
   if (clampClash > 0.5) warn.push(`хомут у штанги задевает ленту: ${clampClash.toFixed(0)} мм³`);
   printJobs.push({ name: 'LOD', what: 'лодочка', m: lodochka, base: [[1, 0, 0], [0, 1, 0], [0, 0, 1]] });
   if (sheet && inserts.length) {
-    const I1 = insertAt(0, IN.len), I2 = insertAt(0, IN.splice_len);
+    const I1 = insertAt(0, IN.len);
     const Fz = frameAt(0);
-    printJobs.push({ name: 'INS-X', what: 'накладка (пересечение)', m: I1, base: [Fz.T, Fz.n, Fz.u].map((v) => [...v]) as any },   // горкой вверх
-                   { name: 'INS-S', what: 'накладка (стык полос)', m: I2, base: [Fz.T, Fz.n, Fz.u].map((v) => [...v]) as any });
+    printJobs.push({ name: 'INS', what: 'накладка «лежачий полицейский»', m: I1, base: [Fz.T, Fz.n, Fz.u].map((v) => [...v]) as any });   // горкой вверх
   }
   const printOut = sheet ? printJobs.filter((j) => j.what !== 'лента') : printJobs;   // лист не печатается — гнётся из полос
 
   // развёртки полос листа 1:1: ось с кривизной κg (кривизна пути по шару), контур ±w/2, отверстия M4:
   // пересечение сверху — Ø4.5 (под M4), снизу — Ø3.3 (резьба M4 в горке); лодочка и лапка хомута — Ø4.5; стык внахлёст — по 2 отверстия
-  const develop = (sa: number, sb: number, idx: number) => {
-    const ext = B.splice_overlap, st = 2, n = Math.ceil((sb + ext - sa) / st);
+  const develop = (sa0: number, sb0: number, idx: number) => {
+    const half = P.insert.len / 2, sa = sa0 - half, sb = sb0 + half, ext = 0, st = 2, n = Math.ceil((sb + ext - sa) / st);
     const kg_ = (s: number) => { const a = frameAt(s - 1), b = frameAt(s + 1), c = frameAt(s); return dot(sub(b.T, a.T), c.n) / 2; };
     const cl: V2[] = [], nrm: V2[] = [], sArr: number[] = [];
     let x = 0, y = 0, th = 0;
@@ -513,10 +532,7 @@ export function build(P: any, wasm: any, opt: { checks?: boolean } = {}) {
     const inStrip = (s: number) => { const d = ((s - sa) % Ltot + Ltot) % Ltot; return d <= sb + ext - sa ? sa + d : null; };
     for (const v of visits) { const sv = inStrip(v.s); if (sv !== null) holes.push({ p: at(sv), d: 4.5, what: v.sign > 0 ? 'пересечение, лента сверху (под накладкой) — Ø4.5, M4' : 'пересечение, лента снизу — Ø4.5, M4' }); }
     for (const v of flats) { const sv = inStrip(v.s); if (sv !== null) holes.push({ p: at(sv), d: 4.5, what: v.kind === 'лодочка' ? 'лодочка — Ø4.5 под M4' : 'лапка хомута — Ø4.5 под M4' }); }
-    for (const e of [10, 30]) {
-      holes.push({ p: at(sa + e), d: 4.5, what: 'стык внахлёст (начало) — Ø4.5, M4 в накладку' });
-      holes.push({ p: at(sb + e), d: 4.5, what: 'стык внахлёст (конец) — Ø4.5, M4 в накладку' });
-    }
+    // стык полос — в пересечении: концы (по ½ накладки) заходят друг на друга, отверстие пересечения общее
     const left = cl.map((c, k) => [c[0] + nrm[k][0] * B.width / 2, c[1] + nrm[k][1] * B.width / 2] as V2);
     const right = cl.map((c, k) => [c[0] - nrm[k][0] * B.width / 2, c[1] - nrm[k][1] * B.width / 2] as V2);
     const kmax = Math.max(...sArr.map((s) => Math.abs(kg_(s))));
@@ -548,7 +564,7 @@ export function build(P: any, wasm: any, opt: { checks?: boolean } = {}) {
     band: { turns: Nt, length_mm: +Ltot.toFixed(0), incl_deg: [+((iMean - iAmp) / D2R).toFixed(0), 90], crossings: crosses.length,
       min_cross_angle_deg: crosses.length ? +(Math.min(...crosses.map((c) => c.ang)) / D2R).toFixed(0) : null, pieces: pieces.length, pieces_info: pieceInfo },
     joints_m6: { crossings: crosses.length, lodochka: 1, rod: 1, total: crosses.length + 2 },
-    joints_m4: sheet ? { crossings: crosses.length, lodochka: 1, clamp: 1, splices: strips.length * 2, total: crosses.length + 2 + strips.length * 2 } : null,
+    joints_m4: sheet ? { crossings: crosses.length, lodochka: 1, clamp: 1, splices_in_crossings: strips.length, total: crosses.length + 2 } : null,
     mass_kg: { band: +kg(bandMP.vol).toFixed(2), node_ring: +kg(ringMP.vol).toFixed(2), arms: +armMP.reduce((s, q) => s + kg(q.vol) * tubeK, 0).toFixed(2),
       lodochka: +kg(lodMP.vol).toFixed(2), rod: +kg(rodMP.vol).toFixed(2), clamp: +kg(clampMP.vol).toFixed(2), sockets_lamps: +(nA * LP.socket_bulb_kg).toFixed(2), total_without_cup: +total.toFixed(2),
       mount: total > P.heavy_mount_kg ? 'усиленное (> 15 кг)' : 'обычное' },
@@ -558,7 +574,7 @@ export function build(P: any, wasm: any, opt: { checks?: boolean } = {}) {
     band_clash: { places: clashN, max_mm3: +clashMax.toFixed(1) },
     material: sheet ? `лист ${B.wall} мм, ${B.sheet_grade}; гладкая; стыки — литые накладки «лежачий полицейский», M4 сквозь ленты` : `литьё ${B.wall} мм`,
     inserts: sheet ? { count: inserts.length, crossing: visits.filter((v) => v.sign > 0).length, splice: inserts.length - visits.filter((v) => v.sign > 0).length,
-      size_mm: `${IN.len}×${B.width * IN.w_frac}×${IN.h} (стык ${IN.splice_len})`, kg: +inserts.reduce((a, m) => a + kg(m.volume()), 0).toFixed(2) } : null,
+      size_mm: `${IN.len}×${B.width * IN.w_frac}×${IN.h}`, kg: +inserts.reduce((a, m) => a + kg(m.volume()), 0).toFixed(2) } : null,
     strips: sheet ? { count: strips.length, lengths_mm: developments.map((d) => d.len_mm), holes_m4: developments.reduce((a, d) => a + d.holes.length, 0),
       min_edge_radius_mm: Math.min(...developments.map((d) => d.min_edge_radius_mm ?? 1e9)) } : null,
     clamp: { z_mm: +clampSel.zc.toFixed(0), tab_len_mm: +(dRod + CL.tab_beyond).toFixed(0), clash_mm3: +clampClash.toFixed(1), side: clampWho[0], note: clampWho[1] },
