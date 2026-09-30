@@ -137,6 +137,7 @@ input[type=range] { width: 100%; accent-color: var(--brass); }
 </div>
 
 <script>/*__THREE__*/</script>
+<script>/*__STUDIO__*/</script>
 <script type="text/plain" id="src-manifold">/*__MANIFOLD_JS__*/</script>
 <script type="text/plain" id="src-core">/*__CELL_CORE__*/</script>
 <script>
@@ -165,16 +166,13 @@ window.__PARAMS__ = /*__PARAMS__*/;
   renderer.toneMappingExposure = 1.0;
   stage.prepend(renderer.domElement);
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x0c0b09);
   const pmrem = new THREE.PMREMGenerator(renderer);
-  scene.environment = pmrem.fromScene(new THREE.RoomEnvironment(), 0.04).texture;
   const camera = new THREE.PerspectiveCamera(35, 1, 0.01, 50);
   const controls = new THREE.OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
-  const key = new THREE.DirectionalLight(0xfff1dc, 1.6); key.position.set(1.5, 2, 1.8); scene.add(key);
-  const glow = new THREE.PointLight(0xffc27a, 1.4, 3); scene.add(glow);
-  const brass = new THREE.MeshStandardMaterial({ color: 0xc8963e, metalness: 0.86, roughness: 0.3 });
-  const bulbMat = new THREE.MeshStandardMaterial({ color: 0xfff4e0, emissive: 0xffd9a0, emissiveIntensity: 1.2, roughness: 0.4 });
+  // студия: софтбоксы в отражениях, тени, свет от ламп, вращение (общий модуль studio.js)
+  const studio = BrassStudio.init({ renderer, scene, camera, controls, pmrem, matte: false });
+  const brass = studio.brass, bulbMat = studio.bulbMat;
   const dark = new THREE.MeshStandardMaterial({ color: 0x3b3326, metalness: 0.6, roughness: 0.5 });
   let group = null;
   const resize = () => {
@@ -277,7 +275,7 @@ self.onmessage = async (e) => {
     if (group) { scene.remove(group); group.traverse((o) => o.geometry && o.geometry.dispose()); }
     group = new THREE.Group();
     let zTop = -Infinity, zBot = Infinity, Rmax = 0;
-    const boxes = [];
+    const boxes = [], bodies = [];
     res.forEach((m, k) => {
       const job = jobs[k];
       const geo = new THREE.BufferGeometry();
@@ -286,7 +284,7 @@ self.onmessage = async (e) => {
       geo.translate(0, 0, job.zOff);
       geo.computeVertexNormals(); geo.computeBoundingBox();
       const bb = geo.boundingBox; boxes.push(bb);
-      group.add(new THREE.Mesh(geo, brass));
+      const body = new THREE.Mesh(geo, brass); group.add(body); bodies.push(body);
       zTop = Math.max(zTop, bb.max.z); zBot = Math.min(zBot, bb.min.z); Rmax = Math.max(Rmax, bb.max.x, bb.max.y);
       const lampsG = lampMeshes(m.lamp, job.tiers, m.armDeg);
       lampsG.position.z = job.zOff; lampsG.visible = m.passport['зазор ламп до рёбер, мм'] >= 0; group.add(lampsG);
@@ -314,6 +312,7 @@ self.onmessage = async (e) => {
     const fit = Math.max(R, H * 0.62) * 1.3 / Math.sin((camera.fov * Math.PI) / 360) / Math.min(1, camera.aspect);
     controls.target.set(0, zc + H * 0.08, 0);
     camera.position.set(0.62 * fit, zc + H * 0.08 + 0.3 * fit, 0.73 * fit);
+    studio.attach(group, bodies);                             // после кадра: в интерьере сцена ставит свою камеру
   }
 
   function passportView(res, jobs, ms) {

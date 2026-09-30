@@ -44,6 +44,7 @@
 </div>
 
 <script>/*__THREE__*/</script>
+<script>/*__STUDIO__*/</script>
 <script type="text/plain" id="src-manifold">/*__MANIFOLD_JS__*/</script>
 <script type="text/plain" id="src-core">/*__ORB_CORE__*/</script>
 <script>
@@ -71,17 +72,13 @@ window.__PARAMS__ = /*__PARAMS__*/;
   renderer.toneMappingExposure = 1.0;
   stage.prepend(renderer.domElement);
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x0c0b09);
   const pmrem = new THREE.PMREMGenerator(renderer);
-  scene.environment = pmrem.fromScene(new THREE.RoomEnvironment(), 0.04).texture;
   const camera = new THREE.PerspectiveCamera(35, 1, 0.01, 50);
   const controls = new THREE.OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
-  const key = new THREE.DirectionalLight(0xfff1dc, 1.5); key.position.set(1.5, 2, 1.8); scene.add(key);
-  const under = new THREE.DirectionalLight(0xffe2b8, 0.45); under.position.set(-0.8, -2, 0.6); scene.add(under);
-  const glow = new THREE.PointLight(0xffc27a, 1.3, 3); scene.add(glow);
-  const brass = new THREE.MeshStandardMaterial({ color: 0xc09046, metalness: 0.8, roughness: 0.5, side: THREE.DoubleSide });   // матовая латунь
-  const bulbMat = new THREE.MeshStandardMaterial({ color: 0xfff4e0, emissive: 0xffd9a0, emissiveIntensity: 1.2, roughness: 0.4 });
+  // студия: софтбоксы в отражениях, тени, свет от ламп, вращение (общий модуль studio.js); латунь матовая — шлифовка с патиной
+  const studio = BrassStudio.init({ renderer, scene, camera, controls, pmrem, matte: true });
+  const brass = studio.brass, bulbMat = studio.bulbMat;
   let group = null, last = null;
   const resize = () => {
     const w = stage.clientWidth, h = stage.clientHeight;
@@ -153,11 +150,11 @@ self.onmessage = async (e) => {
     group.scale.setScalar(0.001);
     group.rotation.x = -Math.PI / 2;                          // Z генератора — вверх
     scene.add(group);
-    glow.position.set(0, 0.02, 0);
     const Rm = state.diam / 2000, H = (zTop - Math.min(zBot, bb.min.z)) / 1000, zc = (zTop + zBot) / 2000;
     const fit = Math.max(Rm, H * 0.62) * 1.3 / Math.sin((camera.fov * Math.PI) / 360) / Math.min(1, camera.aspect);
     controls.target.set(0, zc, 0);
     camera.position.set(0.66 * fit, zc + 0.14 * fit, 0.75 * fit);
+    studio.attach(group, [body]);                             // после кадра: в интерьере сцена ставит свою камеру
   }
 
   function passportView(res) {

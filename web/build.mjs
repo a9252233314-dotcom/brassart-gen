@@ -14,8 +14,9 @@ esb('orbita/generator', '../web/orbita-core.js');
 
 const nm = 'generator/node_modules/';
 const safe = (s) => s.replaceAll('</script', '<\\/script');
-const three = ['three/build/three.min.js', 'three/examples/js/controls/OrbitControls.js', 'three/examples/js/environments/RoomEnvironment.js']
+const three = ['three/build/three.min.js', 'three/examples/js/controls/OrbitControls.js']
   .map((f) => readFileSync(nm + f, 'utf8')).join('\n;\n');
+const studio = readFileSync('web/studio.js', 'utf8');           // студия: свет, отражения, затенение, лампы, вращение — общая для всех семейств
 let mj = readFileSync(nm + 'manifold-3d/manifold.js', 'utf8');
 if (!mj.includes('export default Module;')) throw new Error('manifold.js: не найден export default Module');
 mj = mj.replace('export default Module;', 'self.ManifoldModule = Module;');
@@ -38,6 +39,7 @@ for (const f of families) {
   const page = f.tpl.map((p) => readFileSync(p, 'utf8')).join('')
     .replace('<!--__FAMILY_NAV__-->', () => menu)
     .replace('/*__THREE__*/', () => safe(three))
+    .replace('/*__STUDIO__*/', () => safe(studio))
     .replace('/*__MANIFOLD_JS__*/', () => safe(mj))
     .replace(f.marker, () => safe(readFileSync(f.core, 'utf8')))
     .replace('/*__MANIFOLD_WASM__*/', () => wasm)
