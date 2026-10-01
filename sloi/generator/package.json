@@ -1,0 +1,9 @@
+{
+  "name": "brassart-sloi-generator",
+  "private": true,
+  "type": "module",
+  "description": "Brass Art — генератор семейства СЛОИ (тарелки-линзы ярусами на центральной трубе). v0.",
+  "dependencies": {
+    "manifold-3d": "^3.5.4"
+  }
+}

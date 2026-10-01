@@ -1,0 +1,231 @@
+
+<!--__FAMILY_NAV__-->
+<div class="app">
+  <section class="stage" id="stage" aria-label="3D-вид изделия">
+    <div class="tag">СЛОИ</div>
+    <div class="sub" id="stageSub">латунные тарелки ярусами</div>
+    <div class="hint">крутить — мышью или пальцем, приблизить — колесом</div>
+    <div class="busy" id="busy"><span id="busyText">Запускаю генератор…</span></div>
+  </section>
+
+  <aside class="panel">
+    <div>
+      <h1>Семейство СЛОИ</h1>
+      <p class="lede">Тарелки-линзы ярусами на центральной латунной трубе, на каждом ярусе — свечи. Тарелка — две половины ротационной вытяжки из латунного листа 0.8 мм, спаянные по кромке: внутри пусто, по ней идёт провод. Ширина и подвес — под ваш интерьер.</p>
+    </div>
+
+    <div class="group">
+      <span class="lbl">Вариация</span>
+      <div class="seg" role="group" aria-label="Вариация">
+        <button id="var-pagoda" type="button" aria-pressed="true">Пагода</button>
+      </div>
+    </div>
+
+    <div class="group">
+      <label for="diam">Ширина <output id="diamOut">650 мм</output></label>
+      <input id="diam" type="range" min="650" max="800" step="50" value="650">
+    </div>
+
+    <div class="group">
+      <label for="rod">Подвес <output id="rodOut">0.4 м</output></label>
+      <input id="rod" type="range" min="300" max="3000" step="100" value="400">
+    </div>
+
+    <dl class="passport" id="passport"></dl>
+    <div class="chips" id="warns"></div>
+    <p class="note"><b>Свет.</b> Лампы — светодиодные тёплого света: 2700 K, или 2200 K — тёплый, как свеча. Индекс цветопередачи CRI ≥ 90: при нём латунь выглядит золотой, а не зеленоватой. Белый свет 4000 K и выше латунь холодит — для дома не советуем.</p>
+    <p class="note">Превью в браузере — масса ±5%. Чертежи половин тарелок 1:1 для вытяжника — в цеховом запуске того же генератора. Пять ярусов из трёх размеров тарелок; лампы G9 в латунных гильзах со срезом под конус тарелки (размеры условно).</p>
+  </aside>
+</div>
+
+<script>/*__THREE__*/</script>
+<script>/*__STUDIO__*/</script>
+<script type="text/plain" id="src-manifold">/*__MANIFOLD_JS__*/</script>
+<script type="text/plain" id="src-core">/*__SLOI_CORE__*/</script>
+<script>
+window.__MANIFOLD_WASM__ = "/*__MANIFOLD_WASM__*/";
+window.__PARAMS__ = /*__PARAMS__*/;
+</script>
+<script>
+(() => {
+  const fl = document.createElement('link');
+  fl.rel = 'stylesheet';
+  fl.href = 'https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Tenor+Sans&display=swap';
+  document.head.appendChild(fl);
+
+  const $ = (id) => document.getElementById(id);
+  const busy = $('busy'), busyText = $('busyText');
+  if (!window.THREE || !THREE.OrbitControls) { busyText.textContent = '3D не запустилось в этом браузере — обновите браузер.'; return; }
+  const state = { diam: 650, rod: 400 };
+
+  // ── 3D ──
+  const stage = $('stage');
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+  renderer.outputEncoding = THREE.sRGBEncoding;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.0;
+  stage.prepend(renderer.domElement);
+  const scene = new THREE.Scene();
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  const camera = new THREE.PerspectiveCamera(35, 1, 0.01, 50);
+  const controls = new THREE.OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  // студия: софтбоксы в отражениях, тени, свет от ламп, вращение (общий модуль studio.js)
+  const studio = BrassStudio.init({ renderer, scene, camera, controls, pmrem, matte: false });
+  const brass = studio.brass, bulbMat = studio.bulbMat;
+  let group = null, last = null;
+  const resize = () => {
+    const w = stage.clientWidth, h = stage.clientHeight;
+    renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix();
+  };
+  new ResizeObserver(resize).observe(stage); resize();
+  renderer.setAnimationLoop(() => { controls.update(); renderer.render(scene, camera); });
+
+  // ── генератор в фоновом процессе: страница не замирает; каждая сборка — свежий процесс ──
+  const WORKER_MAIN = `
+self.onmessage = async (e) => {
+  try {
+    const { P, wasm: bin } = e.data;
+    const wasm = await self.ManifoldModule({ wasmBinary: bin, locateFile: (p) => p });
+    wasm.setup();
+    const t = performance.now();
+    const B = self.SLOI.build(P, wasm);
+    const { Manifold } = wasm, tr = [];
+    const pack = (m) => {
+      const g = m.getMesh(), np = g.numProp, vp = g.vertProperties;
+      const pos = new Float32Array((vp.length / np) * 3);
+      for (let i = 0, j = 0; i < vp.length; i += np, j += 3) { pos[j] = vp[i]; pos[j + 1] = vp[i + 1]; pos[j + 2] = vp[i + 2]; }
+      const idx = new Uint32Array(g.triVerts); tr.push(pos.buffer, idx.buffer);
+      return { pos, idx };
+    };
+    const parts = {
+      brass: pack(Manifold.compose([...B.plates, ...B.parts, B.finial, ...B.lamps.map((l) => l.socket)])),
+      rod: pack(Manifold.compose([B.axis, B.cup])),
+      bulb: pack(Manifold.compose(B.lamps.map((l) => l.bulb))),
+    };
+    self.postMessage({ type: 'done', parts, passport: B.passport, warn: B.warn, ms: performance.now() - t }, tr);
+  } catch (err) {
+    self.postMessage({ type: 'error', message: String((err && err.message) || err) });
+  }
+};`;
+  const workerUrl = URL.createObjectURL(new Blob([
+    $('src-manifold').textContent, '\n', $('src-core').textContent, '\n', WORKER_MAIN,
+  ], { type: 'text/javascript' }));
+  const wasmBytes = Uint8Array.from(atob(window.__MANIFOLD_WASM__), (c) => c.charCodeAt(0));
+
+  function paramsNow() {
+    const P = JSON.parse(JSON.stringify(window.__PARAMS__));
+    P.diameter = state.diam; P.rod.length = state.rod;
+    const phone = matchMedia('(max-width: 860px)').matches || (navigator.deviceMemory || 8) <= 4;
+    P.plate.segments = phone ? 72 : 112;                     // превью: круг чуть грубее
+    return P;
+  }
+
+  const geoOf = (m) => {
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(m.pos, 3));
+    geo.setIndex(new THREE.BufferAttribute(m.idx, 1));
+    geo.computeVertexNormals(); geo.computeBoundingBox();
+    return geo;
+  };
+
+  // нормали с учётом изломов: гладко по кругу тарелки, резко на перегибах (кромка, конус, площадка) — без «лучей» на конусе
+  function creased(geo, deg = 20) {
+    const g = geo.toNonIndexed(), pos = g.attributes.position, n = pos.count, cos = Math.cos(deg * Math.PI / 180);
+    const fn = new Float32Array(n * 3), a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3();
+    for (let i = 0; i < n; i += 3) {
+      a.fromBufferAttribute(pos, i); b.fromBufferAttribute(pos, i + 1); c.fromBufferAttribute(pos, i + 2);
+      const f = c.sub(b).cross(a.sub(b)).normalize();
+      for (let k = 0; k < 3; k++) fn.set([f.x, f.y, f.z], (i + k) * 3);
+    }
+    const key = (i) => `${Math.round(pos.getX(i) * 100)},${Math.round(pos.getY(i) * 100)},${Math.round(pos.getZ(i) * 100)}`;
+    const groups = new Map();
+    for (let i = 0; i < n; i++) { const k = key(i); (groups.get(k) || groups.set(k, []).get(k)).push(i); }
+    const out = new Float32Array(n * 3);
+    for (const ids of groups.values()) for (const i of ids) {
+      let x = 0, y = 0, z = 0;
+      for (const j of ids) { const d = fn[i * 3] * fn[j * 3] + fn[i * 3 + 1] * fn[j * 3 + 1] + fn[i * 3 + 2] * fn[j * 3 + 2]; if (d >= cos) { x += fn[j * 3]; y += fn[j * 3 + 1]; z += fn[j * 3 + 2]; } }
+      const l = Math.hypot(x, y, z) || 1; out[i * 3] = x / l; out[i * 3 + 1] = y / l; out[i * 3 + 2] = z / l;
+    }
+    g.setAttribute('normal', new THREE.BufferAttribute(out, 3)); g.computeBoundingBox(); geo.dispose();
+    return g;
+  }
+
+  function show(res) {
+    if (group) { scene.remove(group); group.traverse((o) => o.geometry && o.geometry.dispose()); }
+    group = new THREE.Group();
+    const body = new THREE.Mesh(creased(geoOf(res.parts.brass)), brass); group.add(body);
+    group.add(new THREE.Mesh(geoOf(res.parts.rod), brass));
+    group.add(new THREE.Mesh(geoOf(res.parts.bulb), bulbMat));
+    group.scale.setScalar(0.001);
+    group.rotation.x = -Math.PI / 2;                          // Z генератора — вверх
+    scene.add(group);
+    const s = res.passport.size, zTop = s.z_top, zBot = s.z_bottom;
+    const Rm = state.diam / 2000, H = (zTop - zBot) / 1000, zc = (zTop + zBot) / 2000;
+    const fit = Math.max(Rm, H * 0.62) * 1.3 / Math.sin((camera.fov * Math.PI) / 360) / Math.min(1, camera.aspect);
+    controls.target.set(0, zc, 0);
+    camera.position.set(0.66 * fit, zc + 0.16 * fit, 0.75 * fit);
+    studio.attach(group, [body]);                             // после кадра: в интерьере сцена ставит свою камеру
+  }
+
+  function passportView(res) {
+    const q = res.passport, M = q.mass_kg, kg = (x) => `${x.toFixed(1)} кг`;
+    const rows = [
+      ['Латунь', kg(M.total), true],
+      ['Габарит', `Ø${state.diam} · H ${q.size.height_body_mm} мм`],
+      ['Тарелки', q.plates.map((p) => `Ø${p.D}×${p.count}`).join(' · ') + ` · ${kg(M.plates)}`],
+      ['Лист', `латунь 0.8 мм · ${q.sheet_m2} м²`],
+      ['Центральная труба', q.axis.thread],
+      ['Крепление', q.mount],
+      ['Лампы', `${q.lamps.count} × G9 LED · ярусами ${q.tiers.map((t) => t.lamps).join('+')}`],
+      ['Подвес', `${(state.rod / 1000).toFixed(1)} м`],
+      ['Собрано за', `${(res.ms / 1000).toFixed(1)} с`],
+    ];
+    $('passport').innerHTML = rows.map(([k, v, big]) => `<dt>${k}</dt><dd${big ? ' class="big"' : ''}>${v}</dd>`).join('');
+  }
+
+  let worker = null, jobId = 0, tick = 0;
+  function run() {
+    if (worker) { worker.terminate(); worker = null; }
+    const id = ++jobId;
+    const P = paramsNow();
+    const label = `Собираю · Пагода, Ø${state.diam}`;
+    const t0 = performance.now();
+    busy.hidden = false; busyText.textContent = label + '…';
+    clearInterval(tick);
+    tick = setInterval(() => { busyText.textContent = `${label} · ${Math.floor((performance.now() - t0) / 1000)} с`; }, 250);
+    const done = () => { clearInterval(tick); if (worker) worker.terminate(); worker = null; busy.hidden = true; };
+    try {
+      worker = new Worker(workerUrl, { type: 'module' });
+    } catch (e) {
+      done(); $('warns').innerHTML = '<span class="chip">Браузер не умеет считать в фоне — обновите его (Chrome, Edge, Safari 15+, Firefox 114+).</span>';
+      return;
+    }
+    worker.onmessage = (e) => {
+      if (id !== jobId) return;
+      const m = e.data; done();
+      if (m.type === 'done') {
+        last = m; show(m); passportView(m);
+        $('warns').innerHTML = m.warn.length ? m.warn.map((x) => `<span class="chip">${x}</span>`).join('') : '<span class="chip ok">все проверки пройдены</span>';
+        $('stageSub').textContent = `Ø${state.diam} · Пагода · ${m.passport.lamps.count} ламп`;
+      } else {
+        $('warns').innerHTML = `<span class="chip">Не собралось: ${m.message}.</span>`;
+      }
+    };
+    worker.onerror = (e) => {
+      if (id !== jobId) return;
+      done(); $('warns').innerHTML = `<span class="chip">Генератор остановился: ${e.message || 'ошибка в фоновом процессе'}.</span>`;
+    };
+    worker.postMessage({ P, wasm: wasmBytes });
+  }
+
+  let timer = 0;
+  const later = () => { clearTimeout(timer); timer = setTimeout(run, 300); };
+  $('diam').oninput = (e) => { state.diam = +e.target.value; $('diamOut').textContent = state.diam + ' мм'; };
+  $('diam').onchange = later;
+  $('rod').oninput = (e) => { state.rod = +e.target.value; $('rodOut').textContent = (state.rod / 1000).toFixed(1) + ' м'; };
+  $('rod').onchange = later;
+  run();
+})();
+</script>

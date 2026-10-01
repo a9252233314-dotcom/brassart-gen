@@ -4,6 +4,7 @@
 //   → index.html     — CELL (шар-решётка)
 //   → lepestok.html  — ЛЕПЕСТОК (лепестки вокруг вазы)
 //   → orbita.html    — ОРБИТА (лента-орбита вокруг свечей)
+//   → sloi.html      — СЛОИ (тарелки-линзы ярусами)
 import { readFileSync, writeFileSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 
@@ -11,6 +12,7 @@ const esb = (cwd, out) => execSync(`npx --yes esbuild web.ts --bundle --format=i
 esb('generator', '../web/cell-core.js');
 esb('lepestok/generator', '../web/lepestok-core.js');
 esb('orbita/generator', '../web/orbita-core.js');
+esb('sloi/generator', '../web/sloi-core.js');
 
 const nm = 'generator/node_modules/';
 const safe = (s) => s.replaceAll('</script', '<\\/script');
@@ -32,6 +34,9 @@ const families = [
   { fam: 'orbita', out: 'orbita.html', tpl: ['orbita/web/page_template.html', 'orbita/web/page_body.html'], core: 'orbita/web/orbita-core.js',
     marker: '/*__ORB_CORE__*/', params: 'orbita/params.json',
     desc: 'Brass Art · ОРБИТА — генеративная латунная люстра: одна волнистая лента делает витки вокруг свечей, как орбита.' },
+  { fam: 'sloi', out: 'sloi.html', tpl: ['sloi/web/page_template.html', 'sloi/web/page_body.html'], core: 'sloi/web/sloi-core.js',
+    marker: '/*__SLOI_CORE__*/', params: 'sloi/params.json',
+    desc: 'Brass Art · СЛОИ — латунная люстра: тарелки-линзы ярусами на центральной трубе, свечи на каждом ярусе.' },
 ];
 
 for (const f of families) {
