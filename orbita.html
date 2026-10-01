@@ -144,7 +144,7 @@ input[type=range] { width: 100%; accent-color: var(--brass); }
   <aside class="panel">
     <div>
       <h1>Семейство ОРБИТА</h1>
-      <p class="lede">Одна гладкая лента из латунного листа делает витки вокруг свечей, и каждый виток сдвинут, как орбита. В пересечениях лента идёт то над, то под соседней, а сверху — литая накладка «лежачий полицейский» на болте. У каждого зерна своя орбита.</p>
+      <p class="lede">Одна гладкая лента из латунного листа делает витки вокруг свечей, и каждый виток сдвинут, как орбита. В пересечениях лента идёт то над, то под соседней, а сверху — литая накладка «лежачий полицейский» на болте. Три вариации — от плотной классики до минимализма в три витка.</p>
     </div>
 
     <div class="group">
@@ -153,10 +153,11 @@ input[type=range] { width: 100%; accent-color: var(--brass); }
     </div>
 
     <div class="group">
-      <span class="lbl">Витков ленты</span>
-      <div class="seg" role="group" aria-label="Витков ленты">
-        <button id="turns-4" type="button" aria-pressed="false">4</button>
-        <button id="turns-5" type="button" aria-pressed="true">5</button>
+      <span class="lbl">Вариация</span>
+      <div class="seg" role="group" aria-label="Вариация">
+        <button id="var-classic" type="button" aria-pressed="true">Классика</button>
+        <button id="var-light" type="button" aria-pressed="false">Лёгкость</button>
+        <button id="var-minimal" type="button" aria-pressed="false">Минимализм</button>
       </div>
     </div>
 
@@ -165,7 +166,8 @@ input[type=range] { width: 100%; accent-color: var(--brass); }
       <input id="rod" type="range" min="300" max="3000" step="100" value="400">
     </div>
 
-    <div class="row">
+    <!-- генерация зерном выключена (мастер 2026-10-01: «пока вариации, генерация потом может понадобиться»); вернуть — убрать hidden -->
+    <div class="row" hidden>
       <button class="btn" id="again" type="button">Ещё вариант</button>
       <span class="seed">зерно <span id="seed">1</span></span>
     </div>
@@ -2852,7 +2854,14 @@ window.__PARAMS__ = {"_about":"ОРБИТА v0.2 — параметры гене
   const $ = (id) => document.getElementById(id);
   const busy = $('busy'), busyText = $('busyText');
   if (!window.THREE || !THREE.OrbitControls) { busyText.textContent = '3D не запустилось в этом браузере — обновите браузер.'; return; }
-  const state = { diam: 650, turns: 5, rod: 400, seed: 1 };
+  // вариации (мастер 2026-10-01, по листу GPT — только то, что не меняет конструкцию): у каждой своё число витков
+  // и выбранное зерно, которое проходит все проверки на всех ширинах 650–850
+  const VARIANTS = {
+    classic: { name: 'Классика', turns: 5, seed: 1, about: '5 витков' },
+    light: { name: 'Лёгкость', turns: 4, seed: 1, about: '4 витка, больше воздуха' },
+    minimal: { name: 'Минимализм', turns: 3, seed: 7, about: '3 витка, три пересечения' },
+  };
+  const state = { diam: 650, variant: 'classic', rod: 400, seed: 1 };
 
   // ── 3D ──
   const stage = $('stage');
@@ -2911,7 +2920,7 @@ self.onmessage = async (e) => {
 
   function paramsNow() {
     const P = JSON.parse(JSON.stringify(window.__PARAMS__));
-    P.diameter = state.diam; P.seed = state.seed; P.band.turns = state.turns;
+    P.diameter = state.diam; P.seed = state.seed; P.band.turns = VARIANTS[state.variant].turns;
     const phone = matchMedia('(max-width: 860px)').matches || (navigator.deviceMemory || 8) <= 4;
     Object.assign(P.band, phone ? { step_mm: 4, width_pts: 6, edge_pts: 4 } : { step_mm: 3, width_pts: 7, edge_pts: 4 });   // превью: сетка грубее
     return P;
@@ -2971,7 +2980,7 @@ self.onmessage = async (e) => {
     if (worker) { worker.terminate(); worker = null; }
     const id = ++jobId;
     const P = paramsNow();
-    const label = `Генерирую · Ø${state.diam}, ${state.turns} витков, зерно ${state.seed}`;
+    const label = `Собираю · ${VARIANTS[state.variant].name}, Ø${state.diam}`;
     const t0 = performance.now();
     busy.hidden = false; busyText.textContent = label + '…'; $('again').disabled = true;
     clearInterval(tick);
@@ -2989,7 +2998,7 @@ self.onmessage = async (e) => {
       if (m.type === 'done') {
         last = m; show(m); passportView(m);
         $('warns').innerHTML = m.warn.length ? m.warn.map((x) => `<span class="chip">${x}</span>`).join('') : '<span class="chip ok">все проверки пройдены</span>';
-        $('stageSub').textContent = `Ø${state.diam} · ${state.turns} витков · зерно ${state.seed}`;
+        $('stageSub').textContent = `Ø${state.diam} · ${VARIANTS[state.variant].name} · ${VARIANTS[state.variant].about}`;
       } else {
         $('warns').innerHTML = `<span class="chip">Не собралось: ${m.message}. Нажмите «Ещё вариант».</span>`;
       }
@@ -3006,7 +3015,10 @@ self.onmessage = async (e) => {
   const later = () => { clearTimeout(timer); timer = setTimeout(run, 300); };
   $('diam').oninput = (e) => { state.diam = +e.target.value; $('diamOut').textContent = state.diam + ' мм'; };
   $('diam').onchange = later;
-  for (const n of [4, 5]) $('turns-' + n).onclick = () => { state.turns = n; pressed(['turns-4', 'turns-5'], 'turns-' + n); later(); };
+  for (const v of Object.keys(VARIANTS)) $('var-' + v).onclick = () => {
+    state.variant = v; state.seed = VARIANTS[v].seed; $('seed').textContent = state.seed;
+    pressed(Object.keys(VARIANTS).map((k) => 'var-' + k), 'var-' + v); later();
+  };
   $('rod').oninput = (e) => { state.rod = +e.target.value; $('rodOut').textContent = (state.rod / 1000).toFixed(1) + ' м'; };
   $('rod').onchange = () => { if (last) { show(last); passportView(last); } };
   $('again').onclick = () => { state.seed += 1; $('seed').textContent = state.seed; run(); };

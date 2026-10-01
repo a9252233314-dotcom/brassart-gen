@@ -144,7 +144,7 @@ input[type=range] { width: 100%; accent-color: var(--brass); }
   <aside class="panel">
     <div>
       <h1>Семейство ЛЕПЕСТОК</h1>
-      <p class="lede">Литые латунные лепестки в два яруса вокруг гранёной вазы. У каждого зерна лепестки свои: вылет, высота, ширина, изгиб. Каждый рожок — две отливки: ножка и лист.</p>
+      <p class="lede">Литые латунные лепестки в два яруса вокруг гранёной вазы, закручены «вихрем». Каждый рожок — две отливки: ножка и лист. Ширина и подвес — под ваш интерьер.</p>
     </div>
 
     <div class="group">
@@ -165,7 +165,8 @@ input[type=range] { width: 100%; accent-color: var(--brass); }
       </div>
     </div>
 
-    <div class="row">
+    <!-- генерация зерном выключена (мастер 2026-10-01: «пока вариации, генерация потом может понадобиться»); вернуть — убрать hidden -->
+    <div class="row" hidden>
       <button class="btn" id="again" type="button">Ещё вариант</button>
       <span class="seed">зерно <span id="seed">1</span></span>
     </div>
@@ -2851,7 +2852,7 @@ self.onmessage = async (e) => {
     if (worker) { worker.terminate(); worker = null; }
     const id = ++jobId;
     const P = paramsNow();
-    const label = `Генерирую · Ø${state.diam}, зерно ${state.seed}`;
+    const label = `Собираю · Ø${state.diam}`;
     const t0 = performance.now();
     busy.hidden = false; busyText.textContent = label + '…';
     clearInterval(tick);
@@ -2869,7 +2870,7 @@ self.onmessage = async (e) => {
       if (m.type === 'done') {
         last = m; show(m); passportView(m);
         $('warns').innerHTML = m.warn.length ? m.warn.map((x) => `<span class="chip">${x}</span>`).join('') : '<span class="chip ok">все проверки пройдены</span>';
-        $('stageSub').textContent = `Ø${state.diam} · 12 лепестков · зерно ${state.seed}`;
+        $('stageSub').textContent = `Ø${state.diam} · 12 лепестков · два яруса`;
       } else {
         $('warns').innerHTML = `<span class="chip">Не собралось: ${m.message}. Поменяйте ширину или нажмите «Ещё вариант».</span>`;
       }

@@ -76,7 +76,7 @@ input[type=range] { width: 100%; accent-color: var(--brass); }
   <aside class="panel">
     <div>
       <h1>Семейство CELL</h1>
-      <p class="lede">Литая латунная решётка. Каждое зерно — свой экземпляр: узор, а у овала и волны и форма, рождаются заново.</p>
+      <p class="lede">Литая латунная решётка. Вариации — форма и узор; ширина, лампы и подвес — под ваш интерьер.</p>
     </div>
 
     <div class="group">
@@ -125,7 +125,8 @@ input[type=range] { width: 100%; accent-color: var(--brass); }
       </div>
     </div>
 
-    <div class="row">
+    <!-- генерация зерном выключена (мастер 2026-10-01: «пока вариации, генерация потом может понадобиться»); вернуть — убрать hidden -->
+    <div class="row" hidden>
       <button class="btn" id="again" type="button">Ещё вариант</button>
       <span class="seed">зерно <span id="seed">1</span></span>
     </div>
@@ -358,7 +359,7 @@ self.onmessage = async (e) => {
     const id = ++jobId;
     const jobs = paramsNow();
     const SH = { sphere: 'шар', oval: 'овал', wave: 'волна', double: 'двойной' }, PT = { round: 'круглые ячейки', drops: 'капли', bands: 'ленты' };
-    const label = `Генерирую · ${SH[state.shape]} Ø${state.diam}${state.shape === 'double' ? ' + Ø' + state.diamLow : ''}, зерно ${state.seed}`;
+    const label = `Собираю · ${SH[state.shape]} Ø${state.diam}${state.shape === 'double' ? ' + Ø' + state.diamLow : ''}`;
     const t0 = performance.now();
     busy.hidden = false; busyText.textContent = label + '…';
     clearInterval(tick);
@@ -382,7 +383,7 @@ self.onmessage = async (e) => {
           `Нужна ширина примерно от ${need} мм или меньше ламп.</span>` : '';
         const warns = m.res.flatMap((r, k) => r.warn.map((x) => (jobs[k].name ? jobs[k].name + ': ' : '') + x));
         $('warns').innerHTML = stop + (warns.length ? warns.map((x) => `<span class="chip">${x}</span>`).join('') : (stop ? '' : '<span class="chip ok">все проверки пройдены</span>'));
-        $('stageSub').textContent = `${SH[state.shape]} · ${PT[state.pattern]} · зерно ${state.seed}`;
+        $('stageSub').textContent = `${SH[state.shape]} · ${PT[state.pattern]}`;
       } else {
         $('warns').innerHTML = `<span class="chip">Не собралось: ${m.message}. Поменяйте ширину или число ламп.</span>`;
       }
