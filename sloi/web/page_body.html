@@ -181,8 +181,8 @@ self.onmessage = async (e) => {
       ['Лист', `латунь 0.8 мм · ${q.sheet_m2} м²`],
       ['Центральная труба', q.axis.thread],
       ['Крепление', q.mount],
-      ['Лампы', q.layout === 'смещённая' ? `${q.lamps.count} × G9 LED · в центре тарелок` : `${q.lamps.count} × G9 LED · ярусами ${q.tiers.map((t) => t.lamps).join('+')}`],
-      ...(q.bushings ? [['Втулки на оси', `${q.bushings.count} шт. · торец по конусу тарелки`]] : []),
+      ['Лампы', q.layout === 'смещённая' ? `${q.lamps.count} × G9 LED · у внешнего края тарелок` : `${q.lamps.count} × G9 LED · ярусами ${q.tiers.map((t) => t.lamps).join('+')}`],
+      ...(q.bushings ? [['Втулки на оси', `${q.bushings.count} шт. · торец по конусу тарелки`], ['Место под провод', `${q.wire_space_mm} мм внутри тарелки у оси`]] : []),
       ['Подвес', `${(state.rod / 1000).toFixed(1)} м`],
       ['Собрано за', `${(res.ms / 1000).toFixed(1)} с`],
     ];

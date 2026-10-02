@@ -7,12 +7,12 @@
     const kg = (vol) => vol * P.brass_density_g_cm3 / 1e6;
     const t = PL.sheet, f = PL.rim_flange, cf = PL.center_flat_r, rh = PL.hole_d / 2, seg = PL.segments;
     const tT = Math.tan(PL.top_slope_deg * D2R), tB = Math.tan(PL.bottom_slope_deg * D2R);
-    const halfProfile = (R, top) => {
+    const halfProfile = (R, top, hr = rh) => {
       const s = top ? 1 : -1, tan = top ? tT : tB, h = (R - cf) * tan;
-      return { h, pts: [[rh, s * h], [cf, s * h], [R, 0], [R + f, 0]] };
+      return { h, pts: [[hr, s * h], [cf, s * h], [R, 0], [R + f, 0]] };
     };
-    const half = (R, top) => {
-      const { pts } = halfProfile(R, top), s = top ? -1 : 1;
+    const half = (R, top, hr = rh) => {
+      const { pts } = halfProfile(R, top, hr), s = top ? -1 : 1;
       const inner = pts.map(([r, z], i) => {
         const slope = i === 1 || i === 0 ? 0 : i === 2 ? top ? tT : tB : 0;
         return [r, z + s * t / Math.cos(Math.atan(slope))];
@@ -24,21 +24,22 @@
     function offsetLayout() {
       const O = P.offset, kD2 = (P.diameter || O.diameter) / O.diameter, Hgt2 = P.height * kD2;
       const sizes2 = O.sizes.map((D) => Math.round(D * kD2));
+      const sh = O.lamp_shift || 0, hr = sh > 0 ? 0.5 : rh;
       const lens2 = sizes2.map((D) => {
         const R = D / 2;
-        return { R, ht: (R - cf) * tT, hb: (R - cf) * tB, top: half(R, true), bot: half(R, false) };
+        return { R, ht: (R - cf) * tT, hb: (R - cf) * tB, top: half(R, true, hr), bot: half(R, false, hr) };
       });
       const n2 = O.count, LH2 = LP.socket_h + LP.bulb_h, turn = O.turn_deg * D2R, bd = O.bushing_d, bh = O.bushing_h;
       const pl = Array.from({ length: n2 }, (_, i) => {
         const s = O.pattern[i % O.pattern.length], L = lens2[s];
         return { s, L, e: L.R - O.axis_from_rim, a: i * turn };
       });
-      const eTop2 = pl[0].L.ht + LH2, eBot2 = Math.max(pl[n2 - 1].L.hb, (pl[n2 - 1].L.R - pl[n2 - 1].e) * tB + bh + AX.finial_h);
+      const eTop2 = (pl[0].L.R - Math.max(sh, cf)) * tT + LH2, eBot2 = Math.max(pl[n2 - 1].L.hb, (pl[n2 - 1].L.R - pl[n2 - 1].e) * tB + bh + AX.finial_h);
       const pitch2 = (Hgt2 - eTop2 - eBot2) / (n2 - 1);
       const zOf2 = (i) => -i * pitch2;
       const hole = (z0, h) => Manifold.cylinder(h, AX.d / 2 + 0.5, AX.d / 2 + 0.5, 24).translate([0, 0, z0]);
       const plates2 = [], parts2 = [], lamps2 = [], solids = [], info2 = [];
-      let mx = 0, my = 0, mm = 0;
+      let mx = 0, my = 0, mm = 0, wireMin = Infinity;
       pl.forEach((p, i) => {
         const z = zOf2(i), cx = p.e * Math.cos(p.a), cy = p.e * Math.sin(p.a), L = p.L;
         const top = L.top.translate([cx, cy, z]).subtract(hole(z - 200, 400)), bot = L.bot.translate([cx, cy, z]).subtract(hole(z - 200, 400));
@@ -50,23 +51,28 @@
           // втулка сверху: торец по конусу
           Manifold.cylinder(bh + 3, bd / 2, bd / 2, 32).translate([0, 0, zb - bh]).subtract(bot)
         );
-        const zs = z + L.ht, rb = LP.bulb_d / 2;
-        const socket = Manifold.cylinder(LP.socket_h, LP.socket_d / 2, LP.socket_d / 2, 32).translate([cx, cy, zs]);
-        const bulb = Manifold.union(Manifold.cylinder(LP.bulb_h - rb, rb, rb, 24), Manifold.sphere(rb, 24).translate([0, 0, LP.bulb_h - rb])).translate([cx, cy, zs + LP.socket_h]);
-        lamps2.push({ socket, bulb, at: [cx, cy, zs + LP.socket_h + LP.bulb_h / 2] });
-        const kd = O.knob_d / 2, kz = z - L.hb + 0.5;
+        const lx = cx + sh * Math.cos(p.a), ly = cy + sh * Math.sin(p.a), rb = LP.bulb_d / 2, sr = LP.socket_d / 2;
+        const zs = z + (L.R - Math.max(sh, cf)) * tT, zLow = sh > 0 ? z + (L.R - (sh + sr)) * tT : zs;
+        const socket = Manifold.cylinder(zs - zLow + LP.socket_h, sr, sr, 32).translate([lx, ly, zLow - (sh > 0 ? 0.5 : 0)]).subtract(top);
+        const bulb = Manifold.union(Manifold.cylinder(LP.bulb_h - rb, rb, rb, 24), Manifold.sphere(rb, 24).translate([0, 0, LP.bulb_h - rb])).translate([lx, ly, zs + LP.socket_h]);
+        lamps2.push({ socket, bulb, at: [lx, ly, zs + LP.socket_h + LP.bulb_h / 2] });
+        if (sh > 0 && sh + sr > L.R - 12) warn.push(`\u0442\u0430\u0440\u0435\u043B\u043A\u0430 ${i + 1}: \u0441\u0432\u0435\u0447\u0430 \u043D\u0435 \u0432\u043B\u0435\u0437\u0430\u0435\u0442 \u0434\u043E \u043A\u0440\u043E\u043C\u043A\u0438`);
+        const kd = O.knob_d / 2, kz = z - (L.R - Math.max(sh, cf)) * tB + 0.5;
         parts2.push(Manifold.union(
-          Manifold.cylinder(O.knob_h * 0.45, kd, kd * 0.8, 32).translate([cx, cy, kz - O.knob_h * 0.45]),
-          Manifold.sphere(kd * 0.8, 24).scale([1, 1, 0.9]).translate([cx, cy, kz - O.knob_h * 0.45])
+          Manifold.cylinder(O.knob_h * 0.45, kd, kd * 0.8, 32).translate([lx, ly, kz - O.knob_h * 0.45]),
+          Manifold.sphere(kd * 0.8, 24).scale([1, 1, 0.9]).translate([lx, ly, kz - O.knob_h * 0.45])
         ));
         const m = kg(top.volume() + bot.volume());
         mx += m * cx;
         my += m * cy;
         mm += m;
         if (L.R - p.e - bd / 2 < 10) warn.push(`\u0442\u0430\u0440\u0435\u043B\u043A\u0430 ${i + 1}: \u0432\u0442\u0443\u043B\u043A\u0430 \u0431\u043B\u0438\u0436\u0435 10 \u043C\u043C \u043A \u043A\u0440\u043E\u043C\u043A\u0435`);
+        const wire = (L.R - p.e) * (tT + tB) - 2 * t;
+        if (wire < O.wire_space_min) warn.push(`\u0442\u0430\u0440\u0435\u043B\u043A\u0430 ${i + 1}: \u0432\u043D\u0443\u0442\u0440\u0438 \u0443 \u043E\u0441\u0438 ${wire.toFixed(0)} \u043C\u043C \u2014 \u043C\u0430\u043B\u043E \u043C\u0435\u0441\u0442\u0430 \u043F\u043E\u0434 \u043F\u0440\u043E\u0432\u043E\u0434 (\u043D\u0443\u0436\u043D\u043E \u2265 ${O.wire_space_min})`);
+        wireMin = Math.min(wireMin, wire);
         let gapMin = Infinity;
         for (let j = 0; j < i; j++) {
-          const q = pl[j], qx = q.e * Math.cos(q.a), qy = q.e * Math.sin(q.a), d = Math.hypot(cx - qx, cy - qy);
+          const q = pl[j], qx = q.e * Math.cos(q.a), qy = q.e * Math.sin(q.a), d = Math.hypot(lx - qx, ly - qy);
           if (d > q.L.R + rb) continue;
           const under = zOf2(j) - (q.L.R - Math.max(cf, d - rb)) * tB, gap = under - (zs + LH2);
           gapMin = Math.min(gapMin, gap);
@@ -116,7 +122,8 @@
         })),
         tiers: info2.map((t2) => ({ ...t2, lamps: 1 })),
         com_offset_mm: +com.toFixed(1),
-        lamps: { count: n2, type: LP.bulb, socket: LP.socket, socket_cut_deg: 0, where: "\u0432 \u0446\u0435\u043D\u0442\u0440\u0435 \u043A\u0430\u0436\u0434\u043E\u0439 \u0442\u0430\u0440\u0435\u043B\u043A\u0438" },
+        lamps: { count: n2, type: LP.bulb, socket: LP.socket, socket_cut_deg: 0, where: (O.lamp_shift || 0) > 0 ? `\u0441\u0434\u0432\u0438\u043D\u0443\u0442\u0430 \u043D\u0430 ${O.lamp_shift} \u043C\u043C \u043E\u0442 \u0446\u0435\u043D\u0442\u0440\u0430 \u043D\u0430\u0440\u0443\u0436\u0443` : "\u0432 \u0446\u0435\u043D\u0442\u0440\u0435 \u0442\u0430\u0440\u0435\u043B\u043A\u0438" },
+        wire_space_mm: +wireMin.toFixed(1),
         bushings: { count: 2 * n2, d_mm: bd, note: "\u0442\u043E\u0447\u0451\u043D\u044B\u0435, \u0442\u043E\u0440\u0435\u0446 \u043F\u043E \u043A\u043E\u043D\u0443\u0441\u0443 \u0442\u0430\u0440\u0435\u043B\u043A\u0438 (\u0441\u0432\u0435\u0440\u0445\u0443 \u2014 \u043A\u043E\u043B\u043F\u0430\u043A, \u0441\u043D\u0438\u0437\u0443 \u2014 \u0447\u0430\u0448\u0430)" },
         axis: { thread: AX.thread, d_mm: AX.d, length_mm: +(zCeil2 - zBotAxis2).toFixed(0) },
         mount: total2 > 15 ? "\u0443\u0441\u0438\u043B\u0435\u043D\u043D\u043E\u0435 (> 15 \u043A\u0433)" : "\u043E\u0431\u044B\u0447\u043D\u043E\u0435",

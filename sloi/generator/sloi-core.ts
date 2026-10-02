@@ -15,13 +15,13 @@ export function build(P: any, wasm: any) {
   const tT = Math.tan(PL.top_slope_deg * D2R), tB = Math.tan(PL.bottom_slope_deg * D2R);
 
   // профиль половины по радиусу (наружная поверхность): r → z. top: поясок → конус вверх → площадка
-  const halfProfile = (R: number, top: boolean) => {
+  const halfProfile = (R: number, top: boolean, hr = rh) => {
     const s = top ? 1 : -1, tan = top ? tT : tB, h = (R - cf) * tan;
-    return { h, pts: [[rh, s * h], [cf, s * h], [R, 0], [R + f, 0]] as V2[] };
+    return { h, pts: [[hr, s * h], [cf, s * h], [R, 0], [R + f, 0]] as V2[] };
   };
   // половина как тело вращения: наружная линия + та же, сдвинутая внутрь линзы на толщину листа
-  const half = (R: number, top: boolean) => {
-    const { pts } = halfProfile(R, top), s = top ? -1 : 1;
+  const half = (R: number, top: boolean, hr = rh) => {
+    const { pts } = halfProfile(R, top, hr), s = top ? -1 : 1;
     const inner = pts.map(([r, z], i) => {
       const slope = i === 1 || i === 0 ? 0 : (i === 2 ? (top ? tT : tB) : 0);
       return [r, z + s * t / Math.cos(Math.atan(slope))] as V2;
@@ -36,15 +36,16 @@ export function build(P: any, wasm: any) {
   function offsetLayout() {
     const O = P.offset, kD = (P.diameter || O.diameter) / O.diameter, Hgt = P.height * kD;
     const sizes: number[] = O.sizes.map((D: number) => Math.round(D * kD));
-    const lens = sizes.map((D) => { const R = D / 2; return { R, ht: (R - cf) * tT, hb: (R - cf) * tB, top: half(R, true), bot: half(R, false) }; });
+    const sh = O.lamp_shift || 0, hr = sh > 0 ? 0.5 : rh;                 // свеча сдвинута от центра тарелки наружу (от оси)
+    const lens = sizes.map((D) => { const R = D / 2; return { R, ht: (R - cf) * tT, hb: (R - cf) * tB, top: half(R, true, hr), bot: half(R, false, hr) }; });
     const n = O.count, LH = LP.socket_h + LP.bulb_h, turn = O.turn_deg * D2R, bd = O.bushing_d, bh = O.bushing_h;
     const pl = Array.from({ length: n }, (_, i) => { const s = O.pattern[i % O.pattern.length], L = lens[s]; return { s, L, e: L.R - O.axis_from_rim, a: i * turn }; });
-    const eTop = pl[0].L.ht + LH, eBot = Math.max(pl[n - 1].L.hb, (pl[n - 1].L.R - pl[n - 1].e) * tB + bh + AX.finial_h);
+    const eTop = (pl[0].L.R - Math.max(sh, cf)) * tT + LH, eBot = Math.max(pl[n - 1].L.hb, (pl[n - 1].L.R - pl[n - 1].e) * tB + bh + AX.finial_h);
     const pitch = (Hgt - eTop - eBot) / (n - 1);
     const zOf = (i: number) => -i * pitch;
     const hole = (z0: number, h: number) => Manifold.cylinder(h, AX.d / 2 + 0.5, AX.d / 2 + 0.5, 24).translate([0, 0, z0]);
     const plates: any[] = [], parts: any[] = [], lamps: any[] = [], solids: any[] = [], info: any[] = [];
-    let mx = 0, my = 0, mm = 0;
+    let mx = 0, my = 0, mm = 0, wireMin = Infinity;
     pl.forEach((p, i) => {
       const z = zOf(i), cx = p.e * Math.cos(p.a), cy = p.e * Math.sin(p.a), L = p.L;
       const top = L.top.translate([cx, cy, z]).subtract(hole(z - 200, 400)), bot = L.bot.translate([cx, cy, z]).subtract(hole(z - 200, 400));
@@ -52,20 +53,26 @@ export function build(P: any, wasm: any) {
       const zt = z + (L.R - p.e) * tT, zb = z - (L.R - p.e) * tB;          // поверхность колпака и чаши там, где проходит ось
       parts.push(Manifold.cylinder(bh + 3, bd / 2, bd / 2, 32).translate([0, 0, zt - 3]).subtract(top),       // втулка сверху: торец по конусу
         Manifold.cylinder(bh + 3, bd / 2, bd / 2, 32).translate([0, 0, zb - bh]).subtract(bot));                // втулка снизу
-      const zs = z + L.ht, rb = LP.bulb_d / 2;                            // свеча в центре тарелки, на площадке
-      const socket = Manifold.cylinder(LP.socket_h, LP.socket_d / 2, LP.socket_d / 2, 32).translate([cx, cy, zs]);
-      const bulb = Manifold.union(Manifold.cylinder(LP.bulb_h - rb, rb, rb, 24), Manifold.sphere(rb, 24).translate([0, 0, LP.bulb_h - rb])).translate([cx, cy, zs + LP.socket_h]);
-      lamps.push({ socket, bulb, at: [cx, cy, zs + LP.socket_h + LP.bulb_h / 2] });
+      // свеча: в центре тарелки на площадке или сдвинута наружу (от оси) — тогда гильза стоит на конусе со срезом
+      const lx = cx + sh * Math.cos(p.a), ly = cy + sh * Math.sin(p.a), rb = LP.bulb_d / 2, sr = LP.socket_d / 2;
+      const zs = z + (L.R - Math.max(sh, cf)) * tT, zLow = sh > 0 ? z + (L.R - (sh + sr)) * tT : zs;
+      const socket = Manifold.cylinder(zs - zLow + LP.socket_h, sr, sr, 32).translate([lx, ly, zLow - (sh > 0 ? 0.5 : 0)]).subtract(top);
+      const bulb = Manifold.union(Manifold.cylinder(LP.bulb_h - rb, rb, rb, 24), Manifold.sphere(rb, 24).translate([0, 0, LP.bulb_h - rb])).translate([lx, ly, zs + LP.socket_h]);
+      lamps.push({ socket, bulb, at: [lx, ly, zs + LP.socket_h + LP.bulb_h / 2] });
+      if (sh > 0 && sh + sr > L.R - 12) warn.push(`тарелка ${i + 1}: свеча не влезает до кромки`);
       // снизу в центре — маленькая латунная шишка (гайка патрона, закрывает отверстие), меньше гильзы под лампой (мастер 2026-10-02)
-      const kd = O.knob_d / 2, kz = z - L.hb + 0.5;
-      parts.push(Manifold.union(Manifold.cylinder(O.knob_h * 0.45, kd, kd * 0.8, 32).translate([cx, cy, kz - O.knob_h * 0.45]),
-        Manifold.sphere(kd * 0.8, 24).scale([1, 1, 0.9]).translate([cx, cy, kz - O.knob_h * 0.45])));
+      const kd = O.knob_d / 2, kz = z - (L.R - Math.max(sh, cf)) * tB + 0.5;   // шишка — под свечой
+      parts.push(Manifold.union(Manifold.cylinder(O.knob_h * 0.45, kd, kd * 0.8, 32).translate([lx, ly, kz - O.knob_h * 0.45]),
+        Manifold.sphere(kd * 0.8, 24).scale([1, 1, 0.9]).translate([lx, ly, kz - O.knob_h * 0.45])));
       const m = kg(top.volume() + bot.volume()); mx += m * cx; my += m * cy; mm += m;
       if (L.R - p.e - bd / 2 < 10) warn.push(`тарелка ${i + 1}: втулка ближе 10 мм к кромке`);
+      const wire = (L.R - p.e) * (tT + tB) - 2 * t;                       // высота внутри тарелки там, где из трубы выходит провод
+      if (wire < O.wire_space_min) warn.push(`тарелка ${i + 1}: внутри у оси ${wire.toFixed(0)} мм — мало места под провод (нужно ≥ ${O.wire_space_min})`);
+      wireMin = Math.min(wireMin, wire);
       // свеча и тарелки выше: от верха колбы до низа тарелки над ней
       let gapMin = Infinity;
       for (let j = 0; j < i; j++) {
-        const q = pl[j], qx = q.e * Math.cos(q.a), qy = q.e * Math.sin(q.a), d = Math.hypot(cx - qx, cy - qy);
+        const q = pl[j], qx = q.e * Math.cos(q.a), qy = q.e * Math.sin(q.a), d = Math.hypot(lx - qx, ly - qy);
         if (d > q.L.R + rb) continue;
         const under = zOf(j) - (q.L.R - Math.max(cf, d - rb)) * tB, gap = under - (zs + LH);
         gapMin = Math.min(gapMin, gap);
@@ -100,7 +107,8 @@ export function build(P: any, wasm: any) {
       plates: sizes.map((D, s) => ({ D, count: counts[s], kg_each: +plateKg[s].toFixed(2), lens_mm: +(lens[s].ht + lens[s].hb).toFixed(1),
         top: `конус ${PL.top_slope_deg}°, h ${lens[s].ht.toFixed(1)}`, bottom: `конус ${PL.bottom_slope_deg}°, h ${lens[s].hb.toFixed(1)}` })),
       tiers: info.map((t) => ({ ...t, lamps: 1 })), com_offset_mm: +com.toFixed(1),
-      lamps: { count: n, type: LP.bulb, socket: LP.socket, socket_cut_deg: 0, where: 'в центре каждой тарелки' },
+      lamps: { count: n, type: LP.bulb, socket: LP.socket, socket_cut_deg: 0, where: (O.lamp_shift || 0) > 0 ? `сдвинута на ${O.lamp_shift} мм от центра наружу` : 'в центре тарелки' },
+      wire_space_mm: +wireMin.toFixed(1),
       bushings: { count: 2 * n, d_mm: bd, note: 'точёные, торец по конусу тарелки (сверху — колпак, снизу — чаша)' },
       axis: { thread: AX.thread, d_mm: AX.d, length_mm: +(zCeil - zBotAxis).toFixed(0) }, mount: total > 15 ? 'усиленное (> 15 кг)' : 'обычное',
       mass_kg: { plates: +mPlates.toFixed(2), axis: +mAxis.toFixed(2), nuts_finial: +mSmall.toFixed(2), lamps: +mLamps.toFixed(2), total: +total.toFixed(2) },
