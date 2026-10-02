@@ -54,6 +54,11 @@
         const socket = Manifold.cylinder(LP.socket_h, LP.socket_d / 2, LP.socket_d / 2, 32).translate([cx, cy, zs]);
         const bulb = Manifold.union(Manifold.cylinder(LP.bulb_h - rb, rb, rb, 24), Manifold.sphere(rb, 24).translate([0, 0, LP.bulb_h - rb])).translate([cx, cy, zs + LP.socket_h]);
         lamps2.push({ socket, bulb, at: [cx, cy, zs + LP.socket_h + LP.bulb_h / 2] });
+        const kd = O.knob_d / 2, kz = z - L.hb + 0.5;
+        parts2.push(Manifold.union(
+          Manifold.cylinder(O.knob_h * 0.45, kd, kd * 0.8, 32).translate([cx, cy, kz - O.knob_h * 0.45]),
+          Manifold.sphere(kd * 0.8, 24).scale([1, 1, 0.9]).translate([cx, cy, kz - O.knob_h * 0.45])
+        ));
         const m = kg(top.volume() + bot.volume());
         mx += m * cx;
         my += m * cy;
