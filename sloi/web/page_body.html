@@ -18,6 +18,7 @@
       <span class="lbl">Вариация</span>
       <div class="seg" role="group" aria-label="Вариация">
         <button id="var-pagoda" type="button" aria-pressed="true">Пагода</button>
+        <button id="var-offset" type="button" aria-pressed="false">Смещённая</button>
       </div>
     </div>
 
@@ -56,7 +57,9 @@ window.__PARAMS__ = /*__PARAMS__*/;
   const $ = (id) => document.getElementById(id);
   const busy = $('busy'), busyText = $('busyText');
   if (!window.THREE || !THREE.OrbitControls) { busyText.textContent = '3D не запустилось в этом браузере — обновите браузер.'; return; }
-  const state = { diam: 650, rod: 400 };
+  // вариации: «Пагода» — тарелки по центру оси ярусами; «Смещённая» (мастер 2026-10-02, как у GPT) — ось сквозь тарелку у кромки
+  const VARIANTS = { pagoda: { name: 'Пагода', layout: 'pagoda' }, offset: { name: 'Смещённая', layout: 'offset' } };
+  const state = { diam: 650, rod: 400, variant: 'pagoda' };
 
   // ── 3D ──
   const stage = $('stage');
@@ -116,7 +119,7 @@ self.onmessage = async (e) => {
 
   function paramsNow() {
     const P = JSON.parse(JSON.stringify(window.__PARAMS__));
-    P.diameter = state.diam; P.rod.length = state.rod;
+    P.diameter = state.diam; P.rod.length = state.rod; P.layout = VARIANTS[state.variant].layout;
     const phone = matchMedia('(max-width: 860px)').matches || (navigator.deviceMemory || 8) <= 4;
     P.plate.segments = phone ? 72 : 112;                     // превью: круг чуть грубее
     return P;
@@ -178,7 +181,8 @@ self.onmessage = async (e) => {
       ['Лист', `латунь 0.8 мм · ${q.sheet_m2} м²`],
       ['Центральная труба', q.axis.thread],
       ['Крепление', q.mount],
-      ['Лампы', `${q.lamps.count} × G9 LED · ярусами ${q.tiers.map((t) => t.lamps).join('+')}`],
+      ['Лампы', q.layout === 'смещённая' ? `${q.lamps.count} × G9 LED · в центре тарелок` : `${q.lamps.count} × G9 LED · ярусами ${q.tiers.map((t) => t.lamps).join('+')}`],
+      ...(q.bushings ? [['Втулки на оси', `${q.bushings.count} шт. · торец по конусу тарелки`]] : []),
       ['Подвес', `${(state.rod / 1000).toFixed(1)} м`],
       ['Собрано за', `${(res.ms / 1000).toFixed(1)} с`],
     ];
@@ -190,7 +194,7 @@ self.onmessage = async (e) => {
     if (worker) { worker.terminate(); worker = null; }
     const id = ++jobId;
     const P = paramsNow();
-    const label = `Собираю · Пагода, Ø${state.diam}`;
+    const label = `Собираю · ${VARIANTS[state.variant].name}, Ø${state.diam}`;
     const t0 = performance.now();
     busy.hidden = false; busyText.textContent = label + '…';
     clearInterval(tick);
@@ -208,7 +212,7 @@ self.onmessage = async (e) => {
       if (m.type === 'done') {
         last = m; show(m); passportView(m);
         $('warns').innerHTML = m.warn.length ? m.warn.map((x) => `<span class="chip">${x}</span>`).join('') : '<span class="chip ok">все проверки пройдены</span>';
-        $('stageSub').textContent = `Ø${state.diam} · Пагода · ${m.passport.lamps.count} ламп`;
+        $('stageSub').textContent = `Ø${state.diam} · ${VARIANTS[state.variant].name} · ${m.passport.lamps.count} ламп`;
       } else {
         $('warns').innerHTML = `<span class="chip">Не собралось: ${m.message}.</span>`;
       }
@@ -226,6 +230,9 @@ self.onmessage = async (e) => {
   $('diam').onchange = later;
   $('rod').oninput = (e) => { state.rod = +e.target.value; $('rodOut').textContent = (state.rod / 1000).toFixed(1) + ' м'; };
   $('rod').onchange = later;
+  for (const v of Object.keys(VARIANTS)) $('var-' + v).onclick = () => {
+    state.variant = v; Object.keys(VARIANTS).forEach((k) => $('var-' + k).setAttribute('aria-pressed', String(k === v))); later();
+  };
   run();
 })();
 </script>

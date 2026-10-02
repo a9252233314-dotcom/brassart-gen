@@ -20,6 +20,106 @@
       const poly = top ? [...inner, ...pts.slice().reverse()] : [...pts, ...inner.slice().reverse()];
       return new CrossSection([poly], "Positive").revolve(seg);
     };
+    if (P.layout === "offset") return offsetLayout();
+    function offsetLayout() {
+      const O = P.offset, kD2 = (P.diameter || O.diameter) / O.diameter, Hgt2 = P.height * kD2;
+      const sizes2 = O.sizes.map((D) => Math.round(D * kD2));
+      const lens2 = sizes2.map((D) => {
+        const R = D / 2;
+        return { R, ht: (R - cf) * tT, hb: (R - cf) * tB, top: half(R, true), bot: half(R, false) };
+      });
+      const n2 = O.count, LH2 = LP.socket_h + LP.bulb_h, turn = O.turn_deg * D2R, bd = O.bushing_d, bh = O.bushing_h;
+      const pl = Array.from({ length: n2 }, (_, i) => {
+        const s = O.pattern[i % O.pattern.length], L = lens2[s];
+        return { s, L, e: L.R - O.axis_from_rim, a: i * turn };
+      });
+      const eTop2 = pl[0].L.ht + LH2, eBot2 = Math.max(pl[n2 - 1].L.hb, (pl[n2 - 1].L.R - pl[n2 - 1].e) * tB + bh + AX.finial_h);
+      const pitch2 = (Hgt2 - eTop2 - eBot2) / (n2 - 1);
+      const zOf2 = (i) => -i * pitch2;
+      const hole = (z0, h) => Manifold.cylinder(h, AX.d / 2 + 0.5, AX.d / 2 + 0.5, 24).translate([0, 0, z0]);
+      const plates2 = [], parts2 = [], lamps2 = [], solids = [], info2 = [];
+      let mx = 0, my = 0, mm = 0;
+      pl.forEach((p, i) => {
+        const z = zOf2(i), cx = p.e * Math.cos(p.a), cy = p.e * Math.sin(p.a), L = p.L;
+        const top = L.top.translate([cx, cy, z]).subtract(hole(z - 200, 400)), bot = L.bot.translate([cx, cy, z]).subtract(hole(z - 200, 400));
+        plates2.push(top, bot);
+        solids.push(Manifold.union(top, bot));
+        const zt = z + (L.R - p.e) * tT, zb = z - (L.R - p.e) * tB;
+        parts2.push(
+          Manifold.cylinder(bh + 3, bd / 2, bd / 2, 32).translate([0, 0, zt - 3]).subtract(top),
+          // втулка сверху: торец по конусу
+          Manifold.cylinder(bh + 3, bd / 2, bd / 2, 32).translate([0, 0, zb - bh]).subtract(bot)
+        );
+        const zs = z + L.ht, rb = LP.bulb_d / 2;
+        const socket = Manifold.cylinder(LP.socket_h, LP.socket_d / 2, LP.socket_d / 2, 32).translate([cx, cy, zs]);
+        const bulb = Manifold.union(Manifold.cylinder(LP.bulb_h - rb, rb, rb, 24), Manifold.sphere(rb, 24).translate([0, 0, LP.bulb_h - rb])).translate([cx, cy, zs + LP.socket_h]);
+        lamps2.push({ socket, bulb, at: [cx, cy, zs + LP.socket_h + LP.bulb_h / 2] });
+        const m = kg(top.volume() + bot.volume());
+        mx += m * cx;
+        my += m * cy;
+        mm += m;
+        if (L.R - p.e - bd / 2 < 10) warn.push(`\u0442\u0430\u0440\u0435\u043B\u043A\u0430 ${i + 1}: \u0432\u0442\u0443\u043B\u043A\u0430 \u0431\u043B\u0438\u0436\u0435 10 \u043C\u043C \u043A \u043A\u0440\u043E\u043C\u043A\u0435`);
+        let gapMin = Infinity;
+        for (let j = 0; j < i; j++) {
+          const q = pl[j], qx = q.e * Math.cos(q.a), qy = q.e * Math.sin(q.a), d = Math.hypot(cx - qx, cy - qy);
+          if (d > q.L.R + rb) continue;
+          const under = zOf2(j) - (q.L.R - Math.max(cf, d - rb)) * tB, gap = under - (zs + LH2);
+          gapMin = Math.min(gapMin, gap);
+        }
+        if (gapMin < LP.min_gap) warn.push(`\u0442\u0430\u0440\u0435\u043B\u043A\u0430 ${i + 1}: \u043A\u043E\u043B\u0431\u0430 \u0431\u043B\u0438\u0436\u0435 ${LP.min_gap} \u043C\u043C \u043A \u0442\u0430\u0440\u0435\u043B\u043A\u0435 \u0432\u044B\u0448\u0435 (${gapMin.toFixed(0)} \u043C\u043C)`);
+        info2.push({ plate: i + 1, D: L.R * 2, z_rim: +z.toFixed(1), angle_deg: +(i * O.turn_deg % 360).toFixed(0), offset_mm: +p.e.toFixed(0), lamp_gap_mm: isFinite(gapMin) ? +gapMin.toFixed(0) : null });
+      });
+      for (let i = 0; i < n2; i++) for (let j = i + 1; j < n2 && (j - i) * pitch2 < 150; j++) {
+        const v = Manifold.intersection(solids[i], solids[j]).volume();
+        if (v > 1) warn.push(`\u0442\u0430\u0440\u0435\u043B\u043A\u0438 ${i + 1} \u0438 ${j + 1} \u0437\u0430\u0434\u0435\u0432\u0430\u044E\u0442 \u0434\u0440\u0443\u0433 \u0434\u0440\u0443\u0433\u0430 (${v.toFixed(0)} \u043C\u043C\xB3)`);
+      }
+      const zTopAxis2 = zOf2(0) + (pl[0].L.R - pl[0].e) * tT + bh, zCeil2 = zTopAxis2 + P.rod.length;
+      const zBotAxis2 = zOf2(n2 - 1) - (pl[n2 - 1].L.R - pl[n2 - 1].e) * tB - bh;
+      const axis2 = Manifold.cylinder(zCeil2 - zBotAxis2, AX.d / 2, AX.d / 2, 24).translate([0, 0, zBotAxis2]);
+      const finial2 = Manifold.union(
+        Manifold.cylinder(AX.finial_h * 0.55, AX.finial_d / 2 * 0.55, AX.finial_d / 2, 32).translate([0, 0, zBotAxis2 - AX.finial_h * 0.55]),
+        Manifold.sphere(AX.finial_d / 2, 32).scale([1, 1, 0.8]).translate([0, 0, zBotAxis2 - AX.finial_h * 0.55])
+      );
+      const cup2 = Manifold.cylinder(P.rod.cup_h, P.rod.cup_d / 2 * 0.8, P.rod.cup_d / 2, 64).translate([0, 0, zCeil2 - P.rod.cup_h]);
+      const counts2 = sizes2.map((_, s) => pl.filter((p) => p.s === s).length);
+      const plateKg2 = lens2.map((L) => kg(L.top.volume() + L.bot.volume()));
+      const mPlates2 = counts2.reduce((a, c, s) => a + c * plateKg2[s], 0);
+      const wl2 = AX.wall || 1.5, mAxis2 = kg(axis2.volume() * (1 - ((AX.d / 2 - wl2) / (AX.d / 2)) ** 2));
+      const mSmall2 = parts2.reduce((a, m) => a + kg(m.volume()), 0) + kg(finial2.volume()), mLamps2 = n2 * LP.socket_bulb_kg;
+      const total2 = mPlates2 + mAxis2 + mSmall2 + mLamps2, com = Math.hypot(mx, my) / mm;
+      if (AX.d < 12 && total2 > 6) warn.push(`\u043C\u0430\u0441\u0441\u0430 ${total2.toFixed(1)} \u043A\u0433 > 6 \u043A\u0433: \u0442\u0440\u0443\u0431\u043A\u0430 M10 \u2014 \u0434\u043E 6 \u043A\u0433, \u043D\u0443\u0436\u043D\u0430 M12`);
+      if (com > 3) warn.push(`\u0446\u0435\u043D\u0442\u0440 \u0442\u044F\u0436\u0435\u0441\u0442\u0438 \u0442\u0430\u0440\u0435\u043B\u043E\u043A \u0432 ${com.toFixed(1)} \u043C\u043C \u043E\u0442 \u043E\u0441\u0438`);
+      const reach = Math.max(...pl.map((p) => p.e + p.L.R));
+      const passport2 = {
+        family: "\u0421\u041B\u041E\u0418",
+        layout: "\u0441\u043C\u0435\u0449\u0451\u043D\u043D\u0430\u044F",
+        size: {
+          diameter_mm: Math.round(2 * reach + 2 * f),
+          height_body_mm: +(eTop2 + (n2 - 1) * pitch2 + eBot2).toFixed(0),
+          pitch_mm: +pitch2.toFixed(1),
+          z_top: +eTop2.toFixed(1),
+          z_bottom: +(zOf2(n2 - 1) - eBot2).toFixed(1),
+          z_ceiling: +zCeil2.toFixed(1)
+        },
+        plates: sizes2.map((D, s) => ({
+          D,
+          count: counts2[s],
+          kg_each: +plateKg2[s].toFixed(2),
+          lens_mm: +(lens2[s].ht + lens2[s].hb).toFixed(1),
+          top: `\u043A\u043E\u043D\u0443\u0441 ${PL.top_slope_deg}\xB0, h ${lens2[s].ht.toFixed(1)}`,
+          bottom: `\u043A\u043E\u043D\u0443\u0441 ${PL.bottom_slope_deg}\xB0, h ${lens2[s].hb.toFixed(1)}`
+        })),
+        tiers: info2.map((t2) => ({ ...t2, lamps: 1 })),
+        com_offset_mm: +com.toFixed(1),
+        lamps: { count: n2, type: LP.bulb, socket: LP.socket, socket_cut_deg: 0, where: "\u0432 \u0446\u0435\u043D\u0442\u0440\u0435 \u043A\u0430\u0436\u0434\u043E\u0439 \u0442\u0430\u0440\u0435\u043B\u043A\u0438" },
+        bushings: { count: 2 * n2, d_mm: bd, note: "\u0442\u043E\u0447\u0451\u043D\u044B\u0435, \u0442\u043E\u0440\u0435\u0446 \u043F\u043E \u043A\u043E\u043D\u0443\u0441\u0443 \u0442\u0430\u0440\u0435\u043B\u043A\u0438 (\u0441\u0432\u0435\u0440\u0445\u0443 \u2014 \u043A\u043E\u043B\u043F\u0430\u043A, \u0441\u043D\u0438\u0437\u0443 \u2014 \u0447\u0430\u0448\u0430)" },
+        axis: { thread: AX.thread, d_mm: AX.d, length_mm: +(zCeil2 - zBotAxis2).toFixed(0) },
+        mount: total2 > 15 ? "\u0443\u0441\u0438\u043B\u0435\u043D\u043D\u043E\u0435 (> 15 \u043A\u0433)" : "\u043E\u0431\u044B\u0447\u043D\u043E\u0435",
+        mass_kg: { plates: +mPlates2.toFixed(2), axis: +mAxis2.toFixed(2), nuts_finial: +mSmall2.toFixed(2), lamps: +mLamps2.toFixed(2), total: +total2.toFixed(2) },
+        sheet_m2: +(counts2.reduce((a, c, s) => a + c * 2 * Math.PI * (sizes2[s] / 2 + f) ** 2, 0) / 1e6).toFixed(2)
+      };
+      return { passport: passport2, warn, plates: plates2, parts: parts2, axis: axis2, finial: finial2, cup: cup2, lamps: lamps2, lens: lens2, halfProfile, sizes: sizes2, kg };
+    }
     const kD = (P.diameter || Math.max(...PL.sizes)) / Math.max(...PL.sizes), Hgt = P.height * kD;
     const sizes = PL.sizes.map((D) => Math.round(D * kD)), plates = [], info = [];
     const lens = sizes.map((D) => {

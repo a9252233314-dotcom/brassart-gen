@@ -29,6 +29,82 @@ export function build(P: any, wasm: any) {
     const poly: V2[] = top ? [...inner, ...pts.slice().reverse()] : [...pts, ...inner.slice().reverse()];
     return new CrossSection([poly], 'Positive').revolve(seg);
   };
+  // ── вариация «как у GPT»: ось проходит сквозь каждую тарелку не по центру, а у кромки (мастер 2026-10-02: «крепление
+  // каждой тарелки смещено от центра, как на фото GPT»); где ось проходит сквозь конус — точёные втулки с конусным
+  // торцом сверху и снизу. Тарелки разворачиваются вокруг оси по спирали; свеча — в центре каждой тарелки, на площадке
+  if (P.layout === 'offset') return offsetLayout();
+  function offsetLayout() {
+    const O = P.offset, kD = (P.diameter || O.diameter) / O.diameter, Hgt = P.height * kD;
+    const sizes: number[] = O.sizes.map((D: number) => Math.round(D * kD));
+    const lens = sizes.map((D) => { const R = D / 2; return { R, ht: (R - cf) * tT, hb: (R - cf) * tB, top: half(R, true), bot: half(R, false) }; });
+    const n = O.count, LH = LP.socket_h + LP.bulb_h, turn = O.turn_deg * D2R, bd = O.bushing_d, bh = O.bushing_h;
+    const pl = Array.from({ length: n }, (_, i) => { const s = O.pattern[i % O.pattern.length], L = lens[s]; return { s, L, e: L.R - O.axis_from_rim, a: i * turn }; });
+    const eTop = pl[0].L.ht + LH, eBot = Math.max(pl[n - 1].L.hb, (pl[n - 1].L.R - pl[n - 1].e) * tB + bh + AX.finial_h);
+    const pitch = (Hgt - eTop - eBot) / (n - 1);
+    const zOf = (i: number) => -i * pitch;
+    const hole = (z0: number, h: number) => Manifold.cylinder(h, AX.d / 2 + 0.5, AX.d / 2 + 0.5, 24).translate([0, 0, z0]);
+    const plates: any[] = [], parts: any[] = [], lamps: any[] = [], solids: any[] = [], info: any[] = [];
+    let mx = 0, my = 0, mm = 0;
+    pl.forEach((p, i) => {
+      const z = zOf(i), cx = p.e * Math.cos(p.a), cy = p.e * Math.sin(p.a), L = p.L;
+      const top = L.top.translate([cx, cy, z]).subtract(hole(z - 200, 400)), bot = L.bot.translate([cx, cy, z]).subtract(hole(z - 200, 400));
+      plates.push(top, bot); solids.push(Manifold.union(top, bot));
+      const zt = z + (L.R - p.e) * tT, zb = z - (L.R - p.e) * tB;          // поверхность колпака и чаши там, где проходит ось
+      parts.push(Manifold.cylinder(bh + 3, bd / 2, bd / 2, 32).translate([0, 0, zt - 3]).subtract(top),       // втулка сверху: торец по конусу
+        Manifold.cylinder(bh + 3, bd / 2, bd / 2, 32).translate([0, 0, zb - bh]).subtract(bot));                // втулка снизу
+      const zs = z + L.ht, rb = LP.bulb_d / 2;                            // свеча в центре тарелки, на площадке
+      const socket = Manifold.cylinder(LP.socket_h, LP.socket_d / 2, LP.socket_d / 2, 32).translate([cx, cy, zs]);
+      const bulb = Manifold.union(Manifold.cylinder(LP.bulb_h - rb, rb, rb, 24), Manifold.sphere(rb, 24).translate([0, 0, LP.bulb_h - rb])).translate([cx, cy, zs + LP.socket_h]);
+      lamps.push({ socket, bulb, at: [cx, cy, zs + LP.socket_h + LP.bulb_h / 2] });
+      const m = kg(top.volume() + bot.volume()); mx += m * cx; my += m * cy; mm += m;
+      if (L.R - p.e - bd / 2 < 10) warn.push(`тарелка ${i + 1}: втулка ближе 10 мм к кромке`);
+      // свеча и тарелки выше: от верха колбы до низа тарелки над ней
+      let gapMin = Infinity;
+      for (let j = 0; j < i; j++) {
+        const q = pl[j], qx = q.e * Math.cos(q.a), qy = q.e * Math.sin(q.a), d = Math.hypot(cx - qx, cy - qy);
+        if (d > q.L.R + rb) continue;
+        const under = zOf(j) - (q.L.R - Math.max(cf, d - rb)) * tB, gap = under - (zs + LH);
+        gapMin = Math.min(gapMin, gap);
+      }
+      if (gapMin < LP.min_gap) warn.push(`тарелка ${i + 1}: колба ближе ${LP.min_gap} мм к тарелке выше (${gapMin.toFixed(0)} мм)`);
+      info.push({ plate: i + 1, D: L.R * 2, z_rim: +z.toFixed(1), angle_deg: +((i * O.turn_deg) % 360).toFixed(0), offset_mm: +p.e.toFixed(0), lamp_gap_mm: isFinite(gapMin) ? +gapMin.toFixed(0) : null });
+    });
+    // тарелки не задевают друг друга
+    for (let i = 0; i < n; i++) for (let j = i + 1; j < n && (j - i) * pitch < 150; j++) {
+      const v = Manifold.intersection(solids[i], solids[j]).volume();
+      if (v > 1) warn.push(`тарелки ${i + 1} и ${j + 1} задевают друг друга (${v.toFixed(0)} мм³)`);
+    }
+    const zTopAxis = zOf(0) + (pl[0].L.R - pl[0].e) * tT + bh, zCeil = zTopAxis + P.rod.length;
+    const zBotAxis = zOf(n - 1) - (pl[n - 1].L.R - pl[n - 1].e) * tB - bh;
+    const axis = Manifold.cylinder(zCeil - zBotAxis, AX.d / 2, AX.d / 2, 24).translate([0, 0, zBotAxis]);
+    const finial = Manifold.union(Manifold.cylinder(AX.finial_h * 0.55, AX.finial_d / 2 * 0.55, AX.finial_d / 2, 32).translate([0, 0, zBotAxis - AX.finial_h * 0.55]),
+      Manifold.sphere(AX.finial_d / 2, 32).scale([1, 1, 0.8]).translate([0, 0, zBotAxis - AX.finial_h * 0.55]));
+    const cup = Manifold.cylinder(P.rod.cup_h, P.rod.cup_d / 2 * 0.8, P.rod.cup_d / 2, 64).translate([0, 0, zCeil - P.rod.cup_h]);
+    const counts = sizes.map((_, s) => pl.filter((p) => p.s === s).length);
+    const plateKg = lens.map((L) => kg(L.top.volume() + L.bot.volume()));
+    const mPlates = counts.reduce((a, c, s) => a + c * plateKg[s], 0);
+    const wl = AX.wall || 1.5, mAxis = kg(axis.volume() * (1 - ((AX.d / 2 - wl) / (AX.d / 2)) ** 2));
+    const mSmall = parts.reduce((a, m) => a + kg(m.volume()), 0) + kg(finial.volume()), mLamps = n * LP.socket_bulb_kg;
+    const total = mPlates + mAxis + mSmall + mLamps, com = Math.hypot(mx, my) / mm;
+    if (AX.d < 12 && total > 6) warn.push(`масса ${total.toFixed(1)} кг > 6 кг: трубка M10 — до 6 кг, нужна M12`);
+    if (com > 3) warn.push(`центр тяжести тарелок в ${com.toFixed(1)} мм от оси`);
+    const reach = Math.max(...pl.map((p) => p.e + p.L.R));
+    const passport = {
+      family: 'СЛОИ', layout: 'смещённая',
+      size: { diameter_mm: Math.round(2 * reach + 2 * f), height_body_mm: +(eTop + (n - 1) * pitch + eBot).toFixed(0), pitch_mm: +pitch.toFixed(1),
+        z_top: +eTop.toFixed(1), z_bottom: +(zOf(n - 1) - eBot).toFixed(1), z_ceiling: +zCeil.toFixed(1) },
+      plates: sizes.map((D, s) => ({ D, count: counts[s], kg_each: +plateKg[s].toFixed(2), lens_mm: +(lens[s].ht + lens[s].hb).toFixed(1),
+        top: `конус ${PL.top_slope_deg}°, h ${lens[s].ht.toFixed(1)}`, bottom: `конус ${PL.bottom_slope_deg}°, h ${lens[s].hb.toFixed(1)}` })),
+      tiers: info.map((t) => ({ ...t, lamps: 1 })), com_offset_mm: +com.toFixed(1),
+      lamps: { count: n, type: LP.bulb, socket: LP.socket, socket_cut_deg: 0, where: 'в центре каждой тарелки' },
+      bushings: { count: 2 * n, d_mm: bd, note: 'точёные, торец по конусу тарелки (сверху — колпак, снизу — чаша)' },
+      axis: { thread: AX.thread, d_mm: AX.d, length_mm: +(zCeil - zBotAxis).toFixed(0) }, mount: total > 15 ? 'усиленное (> 15 кг)' : 'обычное',
+      mass_kg: { plates: +mPlates.toFixed(2), axis: +mAxis.toFixed(2), nuts_finial: +mSmall.toFixed(2), lamps: +mLamps.toFixed(2), total: +total.toFixed(2) },
+      sheet_m2: +(counts.reduce((a, c, s) => a + c * 2 * Math.PI * (sizes[s] / 2 + f) ** 2, 0) / 1e6).toFixed(2),
+    };
+    return { passport, warn, plates, parts, axis, finial, cup, lamps, lens, halfProfile, sizes, kg };
+  }
+
   // ширина люстры = самая большая тарелка; остальные размеры и высота — в той же пропорции (P.diameter — ручка сайта)
   const kD = (P.diameter || Math.max(...PL.sizes)) / Math.max(...PL.sizes), Hgt = P.height * kD;
   const sizes: number[] = PL.sizes.map((D: number) => Math.round(D * kD)), plates: any[] = [], info: any[] = [];
