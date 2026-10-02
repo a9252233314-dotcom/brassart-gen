@@ -25,10 +25,10 @@ for (const D of B.sizes) for (const top of [true, false]) {
   const { h, pts } = B.halfProfile(D / 2, top), R = D / 2 + PL.rim_flange, pad = 30, sx = (r: number) => pad + r, H = h + 2 * pad + 60;
   const sy = (z: number) => pad + 40 + (top ? h - z : -z);
   const line = pts.map(([r, z]) => `${sx(r).toFixed(2)},${sy(z).toFixed(2)}`).join(' ');
-  const name = `тарелка Ø${D} — ${top ? 'ВЕРХ' : 'НИЗ'}`;
+  const name = `тарелка Ø${D} — ${top ? 'КОЛПАК (верх)' : 'ЧАША (низ)'}`;
   const txt = [
     `${name} · лист латунь ${PL.sheet} мм · ротационная вытяжка · масштаб 1:1 (мм)`,
-    `кромка Ø${D}, поясок под пайку до Ø${D + 2 * PL.rim_flange} · конус ${top ? PL.top_slope_deg : PL.bottom_slope_deg}° · высота ${h.toFixed(1)} · площадка Ø${2 * PL.center_flat_r}, отверстие Ø${PL.hole_d}`,
+    `кромка Ø${D}, поясок до Ø${D + 2 * PL.rim_flange} (колпак ложится на чашу, без пайки) · конус ${top ? PL.top_slope_deg : PL.bottom_slope_deg}° · высота ${h.toFixed(1)} · площадка Ø${2 * PL.center_flat_r}, отверстие Ø${PL.hole_d}`,
   ];
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${R + 2 * pad}mm" height="${H}mm" viewBox="0 0 ${R + 2 * pad} ${H}">
 <rect width="100%" height="100%" fill="#fff"/>
