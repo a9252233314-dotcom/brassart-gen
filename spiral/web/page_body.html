@@ -181,7 +181,7 @@ self.onmessage = async (e) => {
       ['Рожки', `${q.arms.count} × ${q.arms.thread} · пайка к пластине`],
       ['Пластины ОРБИТЫ', `${q.inserts.count} шт. · ${q.inserts.size_mm}`],
       ['Колонна', `Ø${q.column.d} (условно)`],
-      ['Центр тяжести от оси', `${q.com_offset_mm} мм`],
+      ['Центр тяжести', `на оси · спираль сдвинута на ${q.spiral_shift_mm} мм`],
       ['Крепление', q.mount],
       ['Лампы', `${q.lamps.count} × G9 LED · на рожках`],
       ['Подвес', `${(state.rod / 1000).toFixed(1)} м`],

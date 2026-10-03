@@ -14,7 +14,8 @@
       return Rtop - (Rtop - Rbot) * Math.pow(u, B.radius_ease);
     };
     const zOf = (th) => -w / 2 - Hs * th / TH;
-    const pt = (th) => [rOf(th) * Math.cos(th), rOf(th) * Math.sin(th), zOf(th)];
+    let ox = 0, oy = 0;
+    const pt = (th) => [ox + rOf(th) * Math.cos(th), oy + rOf(th) * Math.sin(th), zOf(th)];
     const NS = 4e3, sArr = new Float64Array(NS + 1);
     for (let i = 1; i <= NS; i++) {
       const a = pt(TH * (i - 1) / NS), b = pt(TH * i / NS);
@@ -31,6 +32,28 @@
       const f = (s - sArr[lo]) / Math.max(1e-9, sArr[hi] - sArr[lo]);
       return TH * (lo + f) / NS;
     };
+    const rho = P.brass_density_g_cm3 / 1e6, armTh = Array.from({ length: AR.count }, (_, k) => thOfS(Lplan * (k + 0.5) / AR.count));
+    const mBandEst = Lplan * w * t * rho, mTubeMm = rho * Math.PI * (AR.d * AR.wall - AR.wall * AR.wall);
+    for (let it = 0; it < 8; it++) {
+      let sx = 0, sy = 0, sm = 0;
+      for (let i = 0; i < NS; i++) {
+        const a = pt(TH * (i + 0.5) / NS), ds = sArr[i + 1] - sArr[i], m = mBandEst * ds / Lplan;
+        sx += m * a[0];
+        sy += m * a[1];
+        sm += m;
+      }
+      for (const th of armTh) {
+        const c = pt(th), d = Math.hypot(c[0], c[1]), ux = c[0] / d, uy = c[1] / d, r0 = CO.d / 2, len = d - t / 2 - IN.h - r0;
+        const mA = mTubeMm * len, rA = r0 + len / 2, rL = d - t / 2 - AR.lamp_inset, mI = rho * IN.len * IN.w * IN.h * 0.5;
+        sx += mA * rA * ux + LP.socket_bulb_kg * rL * ux + mI * c[0];
+        sy += mA * rA * uy + LP.socket_bulb_kg * rL * uy + mI * c[1];
+        sm += mA + LP.socket_bulb_kg + mI;
+      }
+      const zc = rho * Math.PI * ((CO.d / 2) ** 2 - (CO.d / 2 - CO.wall) ** 2) * (Hs + w);
+      sm += zc;
+      ox -= sx / sm;
+      oy -= sy / sm;
+    }
     const frame = (th) => {
       const e = 1e-4, a = pt(th - e), b = pt(th + e);
       const tx = b[0] - a[0], ty = b[1] - a[1], l = Math.hypot(tx, ty);
@@ -92,10 +115,10 @@
     const arms = [], inserts = [], lamps = [], info = [];
     let mx = 0, my = 0, mm = 0;
     for (let k = 0; k < AR.count; k++) {
-      const s = Lplan * (k + 0.5) / AR.count, th = thOfS(s), F = frame(th), r = rOf(th), ux = Math.cos(th), uy = Math.sin(th);
+      const s = Lplan * (k + 0.5) / AR.count, th = thOfS(s), F = frame(th), r = Math.hypot(F.c[0], F.c[1]), phi = Math.atan2(F.c[1], F.c[0]), ux = Math.cos(phi), uy = Math.sin(phi);
       inserts.push(insertAt(th));
       const r0 = CO.d / 2 - 1, r1 = r - t / 2 - IN.h + 2, z = F.c[2], len = r1 - r0;
-      const arm = Manifold.cylinder(len, AR.d / 2, AR.d / 2, 20).rotate([0, 90, 0]).translate([r0, 0, z]).rotate([0, 0, th * 180 / Math.PI]);
+      const arm = Manifold.cylinder(len, AR.d / 2, AR.d / 2, 20).rotate([0, 90, 0]).translate([r0, 0, z]).rotate([0, 0, phi * 180 / Math.PI]);
       arms.push(arm);
       const rl = r - t / 2 - AR.lamp_inset, rb = LP.bulb_d / 2;
       if (rl - LP.socket_d / 2 < CO.d / 2 + 10) warn.push(`\u0440\u043E\u0436\u043E\u043A ${k + 1}: \u0441\u0432\u0435\u0447\u0435 \u0442\u0435\u0441\u043D\u043E \u0443 \u043A\u043E\u043B\u043E\u043D\u043D\u044B (\u0432\u0438\u0442\u043E\u043A \u0443\u0437\u043A\u0438\u0439)`);
@@ -108,13 +131,13 @@
       for (let m = 1; m <= N; m++) {
         const th2 = th - 2 * Math.PI * m;
         if (th2 < 0) break;
-        const r2 = rOf(th2), z2 = zOf(th2);
-        const dr = Math.abs(r2 - rl) - rb - t / 2, dz = z2 - w / 2 - (zs + LH);
+        const p2 = pt(th2), z2 = p2[2];
+        const dr = Math.hypot(p2[0] - lx, p2[1] - ly) - rb - t / 2, dz = z2 - w / 2 - (zs + LH);
         up = Math.min(up, Math.max(dr, dz));
       }
       const gap = Math.min(own, up);
       if (gap < LP.min_gap) warn.push(`\u0440\u043E\u0436\u043E\u043A ${k + 1}: \u043A\u043E\u043B\u0431\u0430 \u0431\u043B\u0438\u0436\u0435 ${LP.min_gap} \u043C\u043C \u043A \u043B\u0435\u043D\u0442\u0435 (${gap.toFixed(0)} \u043C\u043C)`);
-      info.push({ arm: k + 1, angle_deg: +(th * 180 / Math.PI % 360).toFixed(0), z: +z.toFixed(0), r_band: +r.toFixed(0), arm_len: +len.toFixed(0), lamp_gap_mm: +gap.toFixed(0) });
+      info.push({ arm: k + 1, angle_deg: +((phi * 180 / Math.PI + 360) % 360).toFixed(0), z: +z.toFixed(0), r_band: +r.toFixed(0), arm_len: +len.toFixed(0), lamp_gap_mm: +gap.toFixed(0) });
     }
     const nStrips = Math.ceil(Lplan / B.strip_max_mm), strips = [];
     const armS = Array.from({ length: AR.count }, (_, k) => Lplan * (k + 0.5) / AR.count);
@@ -174,7 +197,7 @@
       mm += LP.socket_bulb_kg;
     });
     const total = mBand + mArms + mIns + mCol + mRod + mFin + mLamps, com = Math.hypot(mx, my) / mm;
-    if (com > 5) warn.push(`\u0446\u0435\u043D\u0442\u0440 \u0442\u044F\u0436\u0435\u0441\u0442\u0438 \u0432 ${com.toFixed(0)} \u043C\u043C \u043E\u0442 \u043E\u0441\u0438 \u2014 \u0441\u043F\u0438\u0440\u0430\u043B\u044C \u043D\u0435\u0441\u0438\u043C\u043C\u0435\u0442\u0440\u0438\u0447\u043D\u0430 (\u0440\u0435\u0448\u0435\u043D\u0438\u0435 \u043C\u0430\u0441\u0442\u0435\u0440\u0430: \u043F\u0440\u043E\u0442\u0438\u0432\u043E\u0432\u0435\u0441 / \u0440\u0430\u0441\u043A\u043B\u0430\u0434\u043A\u0430 \u0440\u043E\u0436\u043A\u043E\u0432)`);
+    if (com > 3) warn.push(`\u0446\u0435\u043D\u0442\u0440 \u0442\u044F\u0436\u0435\u0441\u0442\u0438 \u0432 ${com.toFixed(1)} \u043C\u043C \u043E\u0442 \u043E\u0441\u0438`);
     const passport = {
       family: "\u0421\u041F\u0418\u0420\u0410\u041B\u042C",
       layout: "\u0440\u043E\u0436\u043A\u0438 \u0441\u043E \u0441\u0432\u0435\u0447\u0430\u043C\u0438",
@@ -185,6 +208,7 @@
       lamps: { count: AR.count, type: LP.bulb, socket: LP.socket },
       column: { d: CO.d, wall: CO.wall, note: "\u0423\u0421\u041B\u041E\u0412\u041D\u041E \u2014 \u0443\u0437\u0435\u043B \u0440\u0435\u0448\u0430\u0435\u0442 \u043C\u0430\u0441\u0442\u0435\u0440" },
       com_offset_mm: +com.toFixed(1),
+      spiral_shift_mm: +Math.hypot(ox, oy).toFixed(1),
       mount: total > 15 ? "\u0443\u0441\u0438\u043B\u0435\u043D\u043D\u043E\u0435 (> 15 \u043A\u0433)" : "\u043E\u0431\u044B\u0447\u043D\u043E\u0435",
       mass_kg: { band: +mBand.toFixed(2), arms: +mArms.toFixed(2), inserts: +mIns.toFixed(2), column: +mCol.toFixed(2), rod: +mRod.toFixed(2), lamps: +mLamps.toFixed(2), total: +total.toFixed(2) }
     };

@@ -18,7 +18,8 @@ export function build(P: any, wasm: any) {
   // путь по углу θ: радиус и высота центра ленты
   const rOf = (th: number) => { const u = th / TH; return Rtop - (Rtop - Rbot) * Math.pow(u, B.radius_ease); };
   const zOf = (th: number) => -w / 2 - Hs * th / TH;
-  const pt = (th: number): V3 => [rOf(th) * Math.cos(th), rOf(th) * Math.sin(th), zOf(th)];
+  let ox = 0, oy = 0;                                                 // сдвиг спирали: центр тяжести изделия — на оси штанги
+  const pt = (th: number): V3 => [ox + rOf(th) * Math.cos(th), oy + rOf(th) * Math.sin(th), zOf(th)];
   // длина по плану (развёртка — по ней) и обратное: θ по длине
   const NS = 4000, sArr = new Float64Array(NS + 1);
   for (let i = 1; i <= NS; i++) {
@@ -32,6 +33,23 @@ export function build(P: any, wasm: any) {
     const f = (s - sArr[lo]) / Math.max(1e-9, sArr[hi] - sArr[lo]);
     return TH * (lo + f) / NS;
   };
+  // ── балансировка: спираль-воронка несимметрична сама (витки книзу меньше) — сдвигаем её так, чтобы общий центр тяжести
+  // (лента, рожки, пластины, лампы; колонна и штанга — на оси) пришёлся точно на ось штанги (мастер 2026-10-03: «найдёшь
+  // правильный центр тяжести»). Сдвиг — на глаз не виден, рожки выходят чуть разной длины
+  const rho = P.brass_density_g_cm3 / 1e6, armTh = Array.from({ length: AR.count }, (_, k) => thOfS(Lplan * (k + 0.5) / AR.count));
+  const mBandEst = Lplan * w * t * rho, mTubeMm = rho * Math.PI * (AR.d * AR.wall - AR.wall * AR.wall);
+  for (let it = 0; it < 8; it++) {
+    let sx = 0, sy = 0, sm = 0;
+    for (let i = 0; i < NS; i++) { const a = pt(TH * (i + 0.5) / NS), ds = sArr[i + 1] - sArr[i], m = mBandEst * ds / Lplan; sx += m * a[0]; sy += m * a[1]; sm += m; }
+    for (const th of armTh) {
+      const c = pt(th), d = Math.hypot(c[0], c[1]), ux = c[0] / d, uy = c[1] / d, r0 = CO.d / 2, len = d - t / 2 - IN.h - r0;
+      const mA = mTubeMm * len, rA = r0 + len / 2, rL = d - t / 2 - AR.lamp_inset, mI = rho * IN.len * IN.w * IN.h * 0.5;
+      sx += mA * rA * ux + LP.socket_bulb_kg * rL * ux + mI * c[0]; sy += mA * rA * uy + LP.socket_bulb_kg * rL * uy + mI * c[1]; sm += mA + LP.socket_bulb_kg + mI;
+    }
+    const zc = rho * Math.PI * ((CO.d / 2) ** 2 - (CO.d / 2 - CO.wall) ** 2) * (Hs + w);   // колонна на оси — в сумму масс
+    sm += zc; ox -= sx / sm; oy -= sy / sm;
+  }
+
   // горизонтальная нормаль к ленте (к оси) в точке θ
   const frame = (th: number) => {
     const e = 1e-4, a = pt(th - e), b = pt(th + e);
@@ -90,11 +108,11 @@ export function build(P: any, wasm: any) {
   const arms: any[] = [], inserts: any[] = [], lamps: { socket: any; bulb: any; at: V3 }[] = [], info: any[] = [];
   let mx = 0, my = 0, mm = 0;
   for (let k = 0; k < AR.count; k++) {
-    const s = Lplan * (k + 0.5) / AR.count, th = thOfS(s), F = frame(th), r = rOf(th), ux = Math.cos(th), uy = Math.sin(th);
+    const s = Lplan * (k + 0.5) / AR.count, th = thOfS(s), F = frame(th), r = Math.hypot(F.c[0], F.c[1]), phi = Math.atan2(F.c[1], F.c[0]), ux = Math.cos(phi), uy = Math.sin(phi);
     inserts.push(insertAt(th));
     // рожок: горизонтально от стенки колонны по радиусу до пластины
     const r0 = CO.d / 2 - 1, r1 = r - t / 2 - IN.h + 2, z = F.c[2], len = r1 - r0;
-    const arm = Manifold.cylinder(len, AR.d / 2, AR.d / 2, 20).rotate([0, 90, 0]).translate([r0, 0, z]).rotate([0, 0, th * 180 / Math.PI]);
+    const arm = Manifold.cylinder(len, AR.d / 2, AR.d / 2, 20).rotate([0, 90, 0]).translate([r0, 0, z]).rotate([0, 0, phi * 180 / Math.PI]);
     arms.push(arm);
     // свеча на рожке, в lamp_inset от ленты
     const rl = r - t / 2 - AR.lamp_inset, rb = LP.bulb_d / 2;
@@ -108,13 +126,13 @@ export function build(P: any, wasm: any) {
     let up = Infinity;
     for (let m = 1; m <= N; m++) {
       const th2 = th - 2 * Math.PI * m; if (th2 < 0) break;
-      const r2 = rOf(th2), z2 = zOf(th2);
-      const dr = Math.abs(r2 - rl) - rb - t / 2, dz = (z2 - w / 2) - (zs + LH);
+      const p2 = pt(th2), z2 = p2[2];
+      const dr = Math.hypot(p2[0] - lx, p2[1] - ly) - rb - t / 2, dz = (z2 - w / 2) - (zs + LH);
       up = Math.min(up, Math.max(dr, dz));
     }
     const gap = Math.min(own, up);
     if (gap < LP.min_gap) warn.push(`рожок ${k + 1}: колба ближе ${LP.min_gap} мм к ленте (${gap.toFixed(0)} мм)`);
-    info.push({ arm: k + 1, angle_deg: +((th * 180 / Math.PI) % 360).toFixed(0), z: +z.toFixed(0), r_band: +r.toFixed(0), arm_len: +len.toFixed(0), lamp_gap_mm: +gap.toFixed(0) });
+    info.push({ arm: k + 1, angle_deg: +(((phi * 180 / Math.PI) + 360) % 360).toFixed(0), z: +z.toFixed(0), r_band: +r.toFixed(0), arm_len: +len.toFixed(0), lamp_gap_mm: +gap.toFixed(0) });
   }
 
   // ── полосы листа и развёртки: путь по плану × высота; стык полос — под пластиной (как у ОРБИТЫ) ──
@@ -150,7 +168,7 @@ export function build(P: any, wasm: any) {
   const mLamps = AR.count * LP.socket_bulb_kg;
   lamps.forEach((l) => { mx += LP.socket_bulb_kg * l.at[0]; my += LP.socket_bulb_kg * l.at[1]; mm += LP.socket_bulb_kg; });
   const total = mBand + mArms + mIns + mCol + mRod + mFin + mLamps, com = Math.hypot(mx, my) / mm;
-  if (com > 5) warn.push(`центр тяжести в ${com.toFixed(0)} мм от оси — спираль несимметрична (решение мастера: противовес / раскладка рожков)`);
+  if (com > 3) warn.push(`центр тяжести в ${com.toFixed(1)} мм от оси`);
 
   const passport = {
     family: 'СПИРАЛЬ', layout: 'рожки со свечами',
@@ -160,7 +178,7 @@ export function build(P: any, wasm: any) {
     inserts: { count: inserts.length, size_mm: `${IN.len}×${IN.w}×${IN.h}`, note: 'пластина ОРБИТЫ, M4 сквозь ленту' },
     lamps: { count: AR.count, type: LP.bulb, socket: LP.socket },
     column: { d: CO.d, wall: CO.wall, note: 'УСЛОВНО — узел решает мастер' },
-    com_offset_mm: +com.toFixed(1), mount: total > 15 ? 'усиленное (> 15 кг)' : 'обычное',
+    com_offset_mm: +com.toFixed(1), spiral_shift_mm: +Math.hypot(ox, oy).toFixed(1), mount: total > 15 ? 'усиленное (> 15 кг)' : 'обычное',
     mass_kg: { band: +mBand.toFixed(2), arms: +mArms.toFixed(2), inserts: +mIns.toFixed(2), column: +mCol.toFixed(2), rod: +mRod.toFixed(2), lamps: +mLamps.toFixed(2), total: +total.toFixed(2) },
   };
   return { passport, warn, band, column, rod, cup, finial, arms, inserts, lamps, strips, kg };
