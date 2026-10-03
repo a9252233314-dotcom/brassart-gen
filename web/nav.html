@@ -16,7 +16,8 @@
   .fam-tabs { flex: 1 0 100%; }
   .fam-tab { flex: 1 1 0; flex-direction: column; gap: 4px; padding: 8px 4px; text-align: center; }
   .fam-tab svg { width: 30px; height: 30px; }
-  .fam-tab b { font-size: 13px; letter-spacing: .04em; }
+  .fam-tab b { font-size: 11px; letter-spacing: .02em; }
+  .fam-tab svg { width: 26px; height: 26px; }
   .fam-tab span { display: none; }
   .fam-nav + .app .stage { height: 60vh; }
 }
@@ -64,6 +65,13 @@
         <path d="M10 32l10-3 10 3z"/>
       </svg>
       <div><b>СЛОИ</b><span>тарелки ярусами</span></div>
+    </a>
+    <a class="fam-tab" href="spiral.html" data-fam="spiral">
+      <svg viewBox="0 0 40 40" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round">
+        <path d="M20 1v36"/>
+        <path d="M6 9c4-3 24-3 28 0s-20 5-24 8 18 5 18 8-12 4-14 6 6 3 8 4"/>
+      </svg>
+      <div><b>СПИРАЛЬ</b><span>лента-воронка</span></div>
     </a>
   </div>
 </nav>

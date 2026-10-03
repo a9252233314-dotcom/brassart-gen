@@ -5,6 +5,7 @@
 //   → lepestok.html  — ЛЕПЕСТОК (лепестки вокруг вазы)
 //   → orbita.html    — ОРБИТА (лента-орбита вокруг свечей)
 //   → sloi.html      — СЛОИ (тарелки-линзы ярусами)
+//   → spiral.html    — СПИРАЛЬ (лента спиралью-воронкой)
 import { readFileSync, writeFileSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 
@@ -13,6 +14,7 @@ esb('generator', '../web/cell-core.js');
 esb('lepestok/generator', '../web/lepestok-core.js');
 esb('orbita/generator', '../web/orbita-core.js');
 esb('sloi/generator', '../web/sloi-core.js');
+esb('spiral/generator', '../web/spiral-core.js');
 
 const nm = 'generator/node_modules/';
 const safe = (s) => s.replaceAll('</script', '<\\/script');
@@ -37,6 +39,9 @@ const families = [
   { fam: 'sloi', out: 'sloi.html', tpl: ['sloi/web/page_template.html', 'sloi/web/page_body.html'], core: 'sloi/web/sloi-core.js',
     marker: '/*__SLOI_CORE__*/', params: 'sloi/params.json',
     desc: 'Brass Art · СЛОИ — латунная люстра: тарелки-линзы ярусами на центральной трубе, свечи на каждом ярусе.' },
+  { fam: 'spiral', out: 'spiral.html', tpl: ['spiral/web/page_template.html', 'spiral/web/page_body.html'], core: 'spiral/web/spiral-core.js',
+    marker: '/*__SPIRAL_CORE__*/', params: 'spiral/params.json',
+    desc: 'Brass Art · СПИРАЛЬ — латунная люстра: лента из листа спиралью-воронкой вокруг колонны, свечи на рожках.' },
 ];
 
 for (const f of families) {
